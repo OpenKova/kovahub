@@ -11,7 +11,7 @@ import {
 } from "./contracts.js";
 import { requireAuth } from "./auth.js";
 import { preparePublishInputFromArchive } from "./packageInspection.js";
-import type { PackageCommentRecord, RegistryRepository, UserAccount } from "./repository.js";
+import type { AuthPrincipal, PackageCommentRecord, PackageReportRecord, RegistryRepository, UserAccount } from "./repository.js";
 
 const listQuerySchema = z.object({
   q: z.string().optional(),
@@ -47,6 +47,23 @@ const commentBodySchema = z.object({
 });
 const packageReportSchema = z.object({
   reason: z.string().trim().min(3).max(1000),
+});
+const reportListQuerySchema = versionListQuerySchema.extend({
+  status: z.enum(["open", "reviewed", "dismissed"]).optional(),
+});
+const reportParamsSchema = z.object({
+  id: z.string().min(1),
+});
+const reportUpdateSchema = z.object({
+  status: z.enum(["open", "reviewed", "dismissed"]),
+  resolution: z.string().trim().max(1000).nullable().optional(),
+  moderationStatus: z.enum(["pending", "approved", "rejected"]).optional(),
+});
+const packageModerationSchema = z.object({
+  moderationStatus: z.enum(["pending", "approved", "rejected"]).optional(),
+  scanStatus: z.enum(["clean", "suspicious", "malicious", "pending", "not-run"]).optional(),
+  riskLevel: z.enum(["unknown", "low", "medium", "high"]).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
 });
 const packageSettingsSchema = z.object({
   displayName: z.string().trim().min(1).max(120).optional(),
@@ -150,6 +167,28 @@ function publicPackageComment(comment: PackageCommentRecord) {
   };
 }
 
+function publicPackageReport(report: PackageReportRecord) {
+  return {
+    id: report.id,
+    packageName: report.packageName,
+    user: {
+      id: report.userId,
+      handle: report.userHandle,
+    },
+    reason: report.reason,
+    status: report.status,
+    resolution: report.resolution ?? null,
+    resolvedBy: report.resolvedById
+      ? {
+          id: report.resolvedById,
+          handle: report.resolvedByHandle ?? null,
+        }
+      : null,
+    resolvedAt: report.resolvedAt ?? null,
+    createdAt: report.createdAt,
+  };
+}
+
 function publicProfile(user: UserAccount, packages: PackageListItem[]) {
   const stats = packages.reduce(
     (accumulator, item) => {
@@ -206,6 +245,33 @@ async function recordPackageSignal(
     package: toPackageListItem(updated),
     stats: updated.stats,
   };
+}
+
+function configuredReviewerHandles() {
+  return [
+    process.env.KOVAHUB_REVIEWER_HANDLES,
+    process.env.KOVAHUB_ADMIN_HANDLES,
+    process.env.KOVAHUB_REVIEWERS,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => value?.split(",") ?? [])
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isReviewer(user: AuthPrincipal) {
+  const handles = configuredReviewerHandles();
+  return handles.includes(user.handle.toLowerCase()) || handles.includes(`@${user.handle.toLowerCase()}`);
+}
+
+async function requireReviewer(request: FastifyRequest, reply: FastifyReply, repo: RegistryRepository) {
+  const user = await requireAuth(request, reply, repo);
+  if (!user) return null;
+  if (!isReviewer(user)) {
+    reply.code(403).send({ error: "Reviewer access is required." });
+    return null;
+  }
+  return user;
 }
 
 function publicSkillDetail(pkg: PackageRecord) {
@@ -445,6 +511,42 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     return repo.listStarredPackages(user.id, query.data);
   });
 
+  app.get("/api/v1/reviewer/reports", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const query = reportListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid moderation report list request." };
+    }
+    const reports = await repo.listPackageReports(query.data);
+    return {
+      items: reports.items.map(publicPackageReport),
+      nextCursor: reports.nextCursor,
+    };
+  });
+
+  app.patch("/api/v1/reviewer/reports/:id", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = reportParamsSchema.safeParse(request.params);
+    const body = reportUpdateSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid moderation report request."
+          : body.error.issues[0]?.message ?? "Invalid moderation report payload.",
+      };
+    }
+    const report = await repo.updatePackageReport(params.data.id, reviewer, body.data);
+    if (!report) {
+      reply.code(404);
+      return { report: null };
+    }
+    return { report: publicPackageReport(report) };
+  });
+
   app.get("/api/v1/profiles/:handle", async (request, reply) => {
     const params = publisherParamsSchema.safeParse(request.params);
     if (!params.success) {
@@ -677,6 +779,27 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     }
   });
 
+  app.patch("/api/v1/packages/:name/moderation", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageModerationSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package moderation request."
+          : body.error.issues[0]?.message ?? "Invalid package moderation payload.",
+      };
+    }
+    const pkg = await repo.updatePackageModeration(params.data.name, reviewer, body.data);
+    if (!pkg) {
+      reply.code(404);
+      return { package: null };
+    }
+    return publicPackageDetail(pkg);
+  });
+
   app.get("/api/v1/packages/:name", async (request, reply) => {
     const parsed = packageParamsSchema.safeParse(request.params);
     if (!parsed.success) {
@@ -850,16 +973,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     }
     reply.code(201);
     return {
-      report: {
-        id: report.id,
-        packageName: report.packageName,
-        user: {
-          id: report.userId,
-          handle: report.userHandle,
-        },
-        reason: report.reason,
-        createdAt: report.createdAt,
-      },
+      report: publicPackageReport(report),
     };
   });
 

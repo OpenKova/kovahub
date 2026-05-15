@@ -82,6 +82,11 @@ export type PackageReportRecord = {
   userId: string;
   userHandle: string;
   reason: string;
+  status: "open" | "reviewed" | "dismissed";
+  resolution?: string | null;
+  resolvedById?: string | null;
+  resolvedByHandle?: string | null;
+  resolvedAt?: number | null;
   createdAt: number;
 };
 
@@ -104,6 +109,25 @@ export type SearchPackagesOptions = {
   owner?: string;
   tag?: string;
   limit?: number;
+};
+
+export type ListPackageReportsOptions = {
+  status?: PackageReportRecord["status"];
+  limit?: number;
+  cursor?: string;
+};
+
+export type PackageReportUpdateInput = {
+  status: PackageReportRecord["status"];
+  resolution?: string | null;
+  moderationStatus?: PackageVerificationSummary["moderationStatus"];
+};
+
+export type PackageModerationInput = {
+  moderationStatus?: PackageVerificationSummary["moderationStatus"];
+  scanStatus?: PackageVerificationSummary["scanStatus"];
+  riskLevel?: PackageVerificationSummary["riskLevel"];
+  summary?: string | null;
 };
 
 export type RegistryRepository = {
@@ -145,6 +169,9 @@ export type RegistryRepository = {
   listPackageComments(name: string, options?: { limit?: number; cursor?: string }): Promise<{ items: PackageCommentRecord[]; nextCursor: string | null }>;
   addPackageComment(name: string, user: AuthPrincipal, body: string): Promise<PackageCommentRecord | null>;
   reportPackage(name: string, user: AuthPrincipal, reason: string): Promise<PackageReportRecord | null>;
+  listPackageReports(options?: ListPackageReportsOptions): Promise<{ items: PackageReportRecord[]; nextCursor: string | null }>;
+  updatePackageReport(reportId: string, reviewer: AuthPrincipal, input: PackageReportUpdateInput): Promise<PackageReportRecord | null>;
+  updatePackageModeration(name: string, reviewer: AuthPrincipal, input: PackageModerationInput): Promise<PackageRecord | null>;
 };
 
 export type ArchiveFileInput = {
@@ -247,6 +274,21 @@ function assertPackageOwner(pkg: PackageRecord, user: AuthPrincipal) {
 
 function latestActiveVersion(versions: PackageVersionRecord[]) {
   return versions.find((version) => !version.yankedAt) ?? null;
+}
+
+export function mergeVerification(
+  current: PackageVerificationSummary | null | undefined,
+  input: PackageModerationInput,
+): PackageVerificationSummary {
+  return {
+    tier: current?.tier ?? "structural",
+    scope: current?.scope ?? "artifact-only",
+    ...current,
+    ...(input.moderationStatus !== undefined ? { moderationStatus: input.moderationStatus } : {}),
+    ...(input.scanStatus !== undefined ? { scanStatus: input.scanStatus } : {}),
+    ...(input.riskLevel !== undefined ? { riskLevel: input.riskLevel } : {}),
+    ...(input.summary !== undefined ? { summary: input.summary ?? undefined } : {}),
+  };
 }
 
 function discoveryScore(pkg: PackageRecord) {
@@ -880,6 +922,11 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       userId: user.id,
       userHandle: account.handle,
       reason,
+      status: "open",
+      resolution: null,
+      resolvedById: null,
+      resolvedByHandle: null,
+      resolvedAt: null,
       createdAt: now(),
     };
     this.packageReports.set(report.id, report);
@@ -891,6 +938,50 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       summary: "A community report is queued for moderation review.",
     };
     return report;
+  }
+
+  async listPackageReports(options: ListPackageReportsOptions = {}) {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const reports = [...this.packageReports.values()]
+      .filter((report) => (options.status ? report.status === options.status : true))
+      .sort((left, right) => right.createdAt - left.createdAt);
+    const page = reports.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      items: page,
+      nextCursor: nextOffset < reports.length ? String(nextOffset) : null,
+    };
+  }
+
+  async updatePackageReport(reportId: string, reviewer: AuthPrincipal, input: PackageReportUpdateInput) {
+    const report = this.packageReports.get(reportId);
+    if (!report) return null;
+    report.status = input.status;
+    report.resolution = input.resolution ?? null;
+    report.resolvedById = input.status === "open" ? null : reviewer.id;
+    report.resolvedByHandle = input.status === "open" ? null : reviewer.handle;
+    report.resolvedAt = input.status === "open" ? null : now();
+
+    if (input.moderationStatus) {
+      const pkg = await this.getPackage(report.packageName);
+      if (pkg) {
+        pkg.verification = mergeVerification(pkg.verification, {
+          moderationStatus: input.moderationStatus,
+          summary: input.resolution ?? pkg.verification?.summary ?? null,
+        });
+        pkg.updatedAt = now();
+      }
+    }
+    return report;
+  }
+
+  async updatePackageModeration(name: string, _reviewer: AuthPrincipal, input: PackageModerationInput) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    pkg.verification = mergeVerification(pkg.verification, input);
+    pkg.updatedAt = now();
+    return pkg;
   }
 
   private packageStarKey(packageName: string, userId: string) {

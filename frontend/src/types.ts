@@ -115,6 +115,26 @@ export type PackageComment = {
   updatedAt: number;
 };
 
+export type PackageReportStatus = "open" | "reviewed" | "dismissed";
+
+export type PackageReport = {
+  id: string;
+  packageName: string;
+  user: {
+    id: string;
+    handle: string;
+  };
+  reason: string;
+  status: PackageReportStatus;
+  resolution?: string | null;
+  resolvedBy?: {
+    id: string;
+    handle?: string | null;
+  } | null;
+  resolvedAt?: number | null;
+  createdAt: number;
+};
+
 export type PackageStarState = {
   starred: boolean;
 };

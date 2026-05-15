@@ -17,14 +17,18 @@ import {
 } from "./contracts.js";
 import {
   createPackageVersion,
+  mergeVerification,
   normalizeCapabilities,
   normalizeKey,
   normalizeTopics,
   type ApiTokenRecord,
   type AuthPrincipal,
+  type ListPackageReportsOptions,
   type ListPackagesOptions,
+  type PackageModerationInput,
   type PackageCommentRecord,
   type PackageReportRecord,
+  type PackageReportUpdateInput,
   type RegistryRepository,
   type SearchPackagesOptions,
   type UserAccount,
@@ -110,6 +114,11 @@ type PackageReportRow = QueryResultRow & {
   user_id: string;
   user_handle: string;
   reason: string;
+  status: PackageReportRecord["status"];
+  resolution: string | null;
+  resolved_by_id: string | null;
+  resolved_by_handle: string | null;
+  resolved_at: Date | null;
   created_at: Date;
 };
 
@@ -248,6 +257,11 @@ function rowToPackageReport(row: PackageReportRow): PackageReportRecord {
     userId: row.user_id,
     userHandle: row.user_handle,
     reason: row.reason,
+    status: row.status,
+    resolution: row.resolution,
+    resolvedById: row.resolved_by_id,
+    resolvedByHandle: row.resolved_by_handle,
+    resolvedAt: row.resolved_at ? timeMs(row.resolved_at) : null,
     createdAt: timeMs(row.created_at),
   };
 }
@@ -1154,6 +1168,11 @@ export class PostgresRegistryRepository implements RegistryRepository {
             user_id,
             (select handle from users where id = user_id) as user_handle,
             reason,
+            status,
+            resolution,
+            resolved_by_id,
+            null::text as resolved_by_handle,
+            resolved_at,
             created_at
         `,
         [normalizeKey(name), user.id, reason],
@@ -1186,6 +1205,121 @@ export class PostgresRegistryRepository implements RegistryRepository {
     } finally {
       client.release();
     }
+  }
+
+  async listPackageReports(options: ListPackageReportsOptions = {}) {
+    const limit = clampLimit(options.limit, 50);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (options.status) where.push(`pr.status = ${addParam(params, options.status)}`);
+    params.push(limit + 1, offset);
+    const result = await this.pool.query<PackageReportRow>(
+      `
+        select
+          pr.id,
+          p.name as package_name,
+          pr.user_id,
+          u.handle as user_handle,
+          pr.reason,
+          pr.status,
+          pr.resolution,
+          pr.resolved_by_id,
+          ru.handle as resolved_by_handle,
+          pr.resolved_at,
+          pr.created_at
+        from package_reports pr
+        join packages p on p.id = pr.package_id
+        join users u on u.id = pr.user_id
+        left join users ru on ru.id = pr.resolved_by_id
+        ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
+        order by pr.created_at desc
+        limit $${params.length - 1}
+        offset $${params.length}
+      `,
+      params,
+    );
+    const rows = result.rows.slice(0, limit);
+    return {
+      items: rows.map(rowToPackageReport),
+      nextCursor: result.rows.length > limit ? String(offset + limit) : null,
+    };
+  }
+
+  async updatePackageReport(reportId: string, reviewer: AuthPrincipal, input: PackageReportUpdateInput) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const updated = await client.query<PackageReportRow>(
+        `
+          update package_reports pr
+          set
+            status = $2,
+            resolution = $3,
+            resolved_by_id = case when $2 = 'open' then null else $4 end,
+            resolved_at = case when $2 = 'open' then null else now() end
+          from packages p, users u
+          where pr.id = $1 and p.id = pr.package_id and u.id = pr.user_id
+          returning
+            pr.id,
+            p.name as package_name,
+            pr.user_id,
+            u.handle as user_handle,
+            pr.reason,
+            pr.status,
+            pr.resolution,
+            pr.resolved_by_id,
+            (select handle from users where id = pr.resolved_by_id) as resolved_by_handle,
+            pr.resolved_at,
+            pr.created_at
+        `,
+        [reportId, input.status, input.resolution ?? null, reviewer.id],
+      );
+      const row = updated.rows[0];
+      if (!row) {
+        await client.query("rollback");
+        return null;
+      }
+
+      if (input.moderationStatus) {
+        const pkg = await this.getPackage(row.package_name);
+        if (pkg) {
+          const verification = mergeVerification(pkg.verification, {
+            moderationStatus: input.moderationStatus,
+            summary: input.resolution ?? pkg.verification?.summary ?? null,
+          });
+          await client.query("update packages set verification = $2, updated_at = now() where name = $1", [
+            normalizeKey(row.package_name),
+            verification,
+          ]);
+        }
+      }
+
+      await client.query("commit");
+      return rowToPackageReport(row);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async updatePackageModeration(name: string, _reviewer: AuthPrincipal, input: PackageModerationInput) {
+    const current = await this.getPackage(name);
+    if (!current) return null;
+    const verification = mergeVerification(current.verification, input);
+    const result = await this.pool.query<{ name: string }>(
+      `
+        update packages
+        set verification = $2, updated_at = now()
+        where name = $1
+        returning name
+      `,
+      [normalizeKey(name), verification],
+    );
+    const row = result.rows[0];
+    return row ? this.getPackage(row.name) : null;
   }
 
   private async incrementStat(name: string, field: "downloads" | "installs" | "stars") {

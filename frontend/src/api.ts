@@ -5,6 +5,8 @@ import type {
   PackageDetail,
   PackageFamily,
   PackageListItem,
+  PackageReport,
+  PackageReportStatus,
   PackageSettingsPayload,
   PackageSort,
   PackageStarState,
@@ -133,13 +135,48 @@ export async function postPackageComment(name: string, body: string) {
 }
 
 export async function reportPackage(name: string, reason: string) {
-  return request<{ report: { id: string; packageName: string; reason: string; createdAt: number } | null }>(
+  return request<{ report: PackageReport | null }>(
     `/api/v1/packages/${encodeURIComponent(name)}/report`,
     {
       method: "POST",
       body: JSON.stringify({ reason }),
     },
   );
+}
+
+export async function fetchReviewerReports(params: { status?: PackageReportStatus; cursor?: string | null; limit?: number } = {}) {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.cursor) query.set("cursor", params.cursor);
+  query.set("limit", String(params.limit ?? 100));
+  return request<{ items: PackageReport[]; nextCursor: string | null }>(
+    `/api/v1/reviewer/reports?${query.toString()}`,
+  );
+}
+
+export async function updateReviewerReport(
+  id: string,
+  payload: { status: PackageReportStatus; resolution?: string | null; moderationStatus?: "pending" | "approved" | "rejected" },
+) {
+  return request<{ report: PackageReport | null }>(`/api/v1/reviewer/reports/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updatePackageModeration(
+  name: string,
+  payload: {
+    moderationStatus?: "pending" | "approved" | "rejected";
+    scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
+    riskLevel?: "unknown" | "low" | "medium" | "high";
+    summary?: string | null;
+  },
+) {
+  return request<PackageDetail>(`/api/v1/packages/${encodeURIComponent(name)}/moderation`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function publishPackage(payload: PublishPayload) {

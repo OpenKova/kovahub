@@ -907,7 +907,69 @@ describe("registry api", () => {
       packageName: "@openkova/context-bridge",
       user: { handle: "tester" },
       reason: "Please re-check the compatibility metadata.",
+      status: "open",
     });
+
+    const deniedReports = await app.inject({
+      method: "GET",
+      url: "/api/v1/reviewer/reports",
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(deniedReports.statusCode).toBe(403);
+
+    const previousReviewers = process.env.KOVAHUB_REVIEWER_HANDLES;
+    process.env.KOVAHUB_REVIEWER_HANDLES = "tester";
+    try {
+      const reports = await app.inject({
+        method: "GET",
+        url: "/api/v1/reviewer/reports?status=open",
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(reports.statusCode).toBe(200);
+      expect(reports.json().items).toEqual([
+        expect.objectContaining({
+          id: report.json().report.id,
+          packageName: "@openkova/context-bridge",
+          status: "open",
+        }),
+      ]);
+
+      const reviewed = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/reviewer/reports/${report.json().report.id}`,
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: {
+          status: "reviewed",
+          moderationStatus: "approved",
+          resolution: "Compatibility metadata is acceptable.",
+        },
+      });
+      expect(reviewed.statusCode).toBe(200);
+      expect(reviewed.json().report).toMatchObject({
+        status: "reviewed",
+        resolution: "Compatibility metadata is acceptable.",
+        resolvedBy: { handle: "tester" },
+      });
+
+      const moderated = await app.inject({
+        method: "PATCH",
+        url: `${packagePath}/moderation`,
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: {
+          scanStatus: "clean",
+          riskLevel: "low",
+        },
+      });
+      expect(moderated.statusCode).toBe(200);
+      expect(moderated.json().package.verification).toMatchObject({
+        moderationStatus: "approved",
+        scanStatus: "clean",
+        riskLevel: "low",
+      });
+    } finally {
+      if (previousReviewers === undefined) delete process.env.KOVAHUB_REVIEWER_HANDLES;
+      else process.env.KOVAHUB_REVIEWER_HANDLES = previousReviewers;
+    }
 
     const secondToggle = await app.inject({
       method: "POST",

@@ -45,6 +45,7 @@ import {
   fetchPackageStar,
   fetchPackages,
   fetchProfile,
+  fetchReviewerReports,
   fetchStarredPackages,
   getApiBase,
   getStoredToken,
@@ -63,7 +64,9 @@ import {
   togglePackageStar,
   transferPackage,
   updateProfile,
+  updatePackageModeration,
   updatePackageSettings,
+  updateReviewerReport,
   yankPackageVersion,
 } from "./api";
 import { kovaRoboLogo } from "./brandAssets";
@@ -74,6 +77,7 @@ import type {
   PackageDetail,
   PackageFamily,
   PackageListItem,
+  PackageReport,
   PackageSettingsPayload,
   PackageSort,
   ProfileUpdatePayload,
@@ -1950,6 +1954,115 @@ function OwnerPackageCard({
   );
 }
 
+function ModerationPanel() {
+  const [reports, setReports] = useState<PackageReport[]>([]);
+  const [available, setAvailable] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchReviewerReports({ status: "open", limit: 20 })
+      .then((page) => {
+        if (!active) return;
+        setReports(page.items);
+        setAvailable(true);
+      })
+      .catch((err) => {
+        if (!active) return;
+        if (isAuthError(err)) {
+          setAvailable(false);
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Failed to load moderation reports.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function closeReport(
+    report: PackageReport,
+    action: "dismissed" | "approved" | "rejected" | "clean",
+  ) {
+    setStatus(null);
+    setError(null);
+    try {
+      if (action === "clean") {
+        await updatePackageModeration(report.packageName, {
+          scanStatus: "clean",
+          riskLevel: "low",
+          summary: "Reviewer marked this package clean.",
+        });
+        setStatus("Package scan status updated.");
+        return;
+      }
+      const result = await updateReviewerReport(report.id, {
+        status: action === "dismissed" ? "dismissed" : "reviewed",
+        moderationStatus: action === "dismissed" ? "pending" : action,
+        resolution:
+          action === "dismissed"
+            ? "Report dismissed by reviewer."
+            : `Package moderation marked ${action}.`,
+      });
+      if (result.report) {
+        setReports((current) => current.filter((candidate) => candidate.id !== result.report?.id));
+      }
+      setStatus("Moderation report updated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Moderation action failed.");
+    }
+  }
+
+  if (!available) return null;
+
+  return (
+    <section className="content-section moderation-panel">
+      <div className="content-section-head">
+        <h2>Review queue</h2>
+        <span>{reports.length} open</span>
+      </div>
+      {loading ? <p className="content-muted">Loading reports...</p> : null}
+      {error ? <p className="form-error">{error}</p> : null}
+      {status ? <p className="form-success">{status}</p> : null}
+      {!loading && reports.length === 0 ? <p className="content-muted">No open reports.</p> : null}
+      <div className="moderation-list">
+        {reports.map((report) => (
+          <article className="moderation-row" key={report.id}>
+            <div>
+              <Link to={packageRoute(report.packageName)}>{report.packageName}</Link>
+              <p>{report.reason}</p>
+              <small>
+                Reported by @{report.user.handle} - {formatDate(report.createdAt)}
+              </small>
+            </div>
+            <div className="moderation-actions">
+              <button type="button" onClick={() => void closeReport(report, "approved")}>
+                Approve
+              </button>
+              <button type="button" onClick={() => void closeReport(report, "rejected")}>
+                Reject
+              </button>
+              <button type="button" onClick={() => void closeReport(report, "dismissed")}>
+                Dismiss
+              </button>
+              <button type="button" onClick={() => void closeReport(report, "clean")}>
+                Mark clean
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DirectoryPage({ kind, theme }: { kind: "skills" | "plugins"; theme: ThemeSettings }) {
   const { packages, loading, error } = usePackageCatalog();
   const isSkills = kind === "skills";
@@ -2771,6 +2884,8 @@ function DashboardPage({ theme }: { theme: ThemeSettings }) {
         </article>
         <ApiTokenPanel user={user} />
       </section>
+
+      <ModerationPanel />
 
       <section className="content-section">
         <div className="content-section-head">
