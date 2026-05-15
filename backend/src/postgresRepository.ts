@@ -18,12 +18,14 @@ import {
   createPackageVersion,
   normalizeCapabilities,
   normalizeKey,
+  normalizeTopics,
   seedOwner,
   seedPackageInputs,
   type ApiTokenRecord,
   type AuthPrincipal,
   type ListPackagesOptions,
   type RegistryRepository,
+  type SearchPackagesOptions,
   type UserAccount,
 } from "./repository.js";
 
@@ -36,6 +38,7 @@ type PackageRow = QueryResultRow & {
   owner_id: string;
   owner_handle: string | null;
   summary: string | null;
+  topics: string[];
   runtime_id: string | null;
   latest_version: string | null;
   is_official: boolean;
@@ -90,6 +93,7 @@ const packageColumns = `
     p.owner_id,
     u.handle as owner_handle,
     p.summary,
+    p.topics,
     p.runtime_id,
     p.latest_version,
     p.is_official,
@@ -127,11 +131,12 @@ function addParam(params: unknown[], value: unknown) {
 
 function packageSearchPredicate(param: string) {
   return `(
-    to_tsvector('simple', coalesce(p.name, '') || ' ' || coalesce(p.display_name, '') || ' ' || coalesce(p.summary, ''))
+    to_tsvector('simple', coalesce(p.name, '') || ' ' || coalesce(p.display_name, '') || ' ' || coalesce(p.summary, '') || ' ' || array_to_string(p.topics, ' '))
       @@ plainto_tsquery('simple', ${param})
     or p.name ilike '%' || ${param} || '%'
     or p.display_name ilike '%' || ${param} || '%'
     or coalesce(p.summary, '') ilike '%' || ${param} || '%'
+    or exists(select 1 from unnest(p.topics) topic where topic ilike '%' || ${param} || '%')
   )`;
 }
 
@@ -179,6 +184,7 @@ function rowToPackage(row: PackageRow, versions: PackageVersionRecord[] = []): P
     isOfficial: row.is_official,
     summary: row.summary,
     ownerHandle: row.owner_handle,
+    topics: row.topics,
     createdAt: timeMs(row.created_at),
     updatedAt: timeMs(row.updated_at),
     latestVersion: row.latest_version,
@@ -426,6 +432,12 @@ export class PostgresRegistryRepository implements RegistryRepository {
     if (!options.family && options.families?.length) {
       where.push(`p.family = any(${addParam(params, options.families)}::package_family[])`);
     }
+    if (options.owner?.trim()) {
+      where.push(`u.handle = ${addParam(params, normalizeKey(options.owner))}`);
+    }
+    if (options.tag?.trim()) {
+      where.push(`${addParam(params, normalizeTopics([options.tag])[0] ?? "")} = any(p.topics)`);
+    }
     if (options.q?.trim() && options.q.trim() !== "*") {
       where.push(packageSearchPredicate(addParam(params, options.q.trim())));
     }
@@ -448,7 +460,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
     };
   }
 
-  async searchPackages(options: { q: string; family?: PackageFamily; families?: PackageFamily[]; limit?: number }) {
+  async searchPackages(options: SearchPackagesOptions) {
     const limit = clampLimit(options.limit, 20);
     const params: unknown[] = [];
     const where: string[] = [];
@@ -458,6 +470,12 @@ export class PostgresRegistryRepository implements RegistryRepository {
     if (!options.family && options.families?.length) {
       where.push(`p.family = any(${addParam(params, options.families)}::package_family[])`);
     }
+    if (options.owner?.trim()) {
+      where.push(`u.handle = ${addParam(params, normalizeKey(options.owner))}`);
+    }
+    if (options.tag?.trim()) {
+      where.push(`${addParam(params, normalizeTopics([options.tag])[0] ?? "")} = any(p.topics)`);
+    }
     if (options.q.trim() && options.q.trim() !== "*") {
       const qParam = addParam(params, options.q.trim());
       where.push(packageSearchPredicate(qParam));
@@ -466,6 +484,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
           when lower(p.name) = lower(${qParam}) then 100
           when p.name ilike '%' || ${qParam} || '%' then 80
           when p.display_name ilike '%' || ${qParam} || '%' then 60
+          when exists(select 1 from unnest(p.topics) topic where lower(topic) = lower(${qParam})) then 50
           when coalesce(p.summary, '') ilike '%' || ${qParam} || '%' then 30
           else 10
         end
@@ -516,6 +535,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
     }
 
     const capabilities = normalizeCapabilities(input, compatibility);
+    const topics = normalizeTopics(input.tags);
     const version = createPackageVersion({ payload: input, compatibility, capabilities });
     const packageName = normalizeKey(input.name);
     const storageKey = archiveStorageKey({
@@ -555,7 +575,8 @@ export class PostgresRegistryRepository implements RegistryRepository {
               compatibility = $6,
               capabilities = $7,
               verification = $8,
-              updated_at = $9,
+              topics = $9,
+              updated_at = $10,
               stats = jsonb_set(
                 stats,
                 '{versions}',
@@ -573,6 +594,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
             compatibility,
             capabilities,
             version.verification ?? null,
+            topics,
             new Date(version.createdAt),
           ],
         );
@@ -586,6 +608,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
               channel,
               owner_id,
               summary,
+              topics,
               runtime_id,
               latest_version,
               is_official,
@@ -611,7 +634,8 @@ export class PostgresRegistryRepository implements RegistryRepository {
               $12,
               $13,
               $14,
-              $14
+              $15,
+              $15
             )
             returning id
           `,
@@ -622,6 +646,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
             input.channel,
             owner.id,
             input.summary ?? null,
+            topics,
             capabilities?.runtimeId ?? null,
             version.version,
             input.channel === "official",

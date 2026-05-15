@@ -15,6 +15,8 @@ import type { RegistryRepository } from "./repository.js";
 const listQuerySchema = z.object({
   q: z.string().optional(),
   family: z.enum(packageFamilies).optional(),
+  owner: z.string().trim().min(1).optional(),
+  tag: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
 });
@@ -22,12 +24,16 @@ const listQuerySchema = z.object({
 const searchQuerySchema = z.object({
   q: z.string().default("*"),
   family: z.enum(packageFamilies).optional(),
+  owner: z.string().trim().min(1).optional(),
+  tag: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
 });
 
 const packageParamsSchema = z.object({ name: z.string().min(1) });
 const packageVersionParamsSchema = packageParamsSchema.extend({ version: z.string().min(1) });
 const skillParamsSchema = z.object({ slug: z.string().min(1) });
+const publisherParamsSchema = z.object({ handle: z.string().trim().min(1) });
+const tagParamsSchema = z.object({ tag: z.string().trim().min(1) });
 const versionListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
@@ -104,6 +110,7 @@ function publicSkillDetail(pkg: PackageRecord) {
       displayName: pkg.displayName,
       summary: pkg.summary ?? undefined,
       tags: pkg.tags,
+      topics: pkg.topics ?? [],
       createdAt: pkg.createdAt,
       updatedAt: pkg.updatedAt,
     },
@@ -239,7 +246,7 @@ async function listPackageCatalog(
   request: FastifyRequest,
   reply: FastifyReply,
   repo: RegistryRepository,
-  filter: { family?: PackageFamily; families?: PackageFamily[] } = {},
+  filter: { family?: PackageFamily; families?: PackageFamily[]; owner?: string; tag?: string } = {},
 ) {
   const parsed = listQuerySchema.safeParse(request.query);
   if (!parsed.success) {
@@ -255,7 +262,7 @@ async function searchPackageCatalog(
   request: FastifyRequest,
   reply: FastifyReply,
   repo: RegistryRepository,
-  filter: { family?: PackageFamily; families?: PackageFamily[] } = {},
+  filter: { family?: PackageFamily; families?: PackageFamily[]; owner?: string; tag?: string } = {},
 ) {
   const parsed = searchQuerySchema.safeParse(request.query);
   if (!parsed.success) {
@@ -310,6 +317,24 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
 
   app.get("/api/v1/packages/search", async (request, reply) => {
     return searchPackageCatalog(request, reply, repo);
+  });
+
+  app.get("/api/v1/publishers/:handle/packages", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid publisher handle." };
+    }
+    return listPackageCatalog(request, reply, repo, { owner: params.data.handle });
+  });
+
+  app.get("/api/v1/tags/:tag/packages", async (request, reply) => {
+    const params = tagParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package tag." };
+    }
+    return listPackageCatalog(request, reply, repo, { tag: params.data.tag });
   });
 
   app.get("/api/v1/plugins", async (request, reply) => {

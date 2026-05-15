@@ -42,6 +42,8 @@ export type ListPackagesOptions = {
   q?: string;
   family?: PackageFamily;
   families?: PackageFamily[];
+  owner?: string;
+  tag?: string;
   limit?: number;
   cursor?: string;
 };
@@ -50,6 +52,8 @@ export type SearchPackagesOptions = {
   q: string;
   family?: PackageFamily;
   families?: PackageFamily[];
+  owner?: string;
+  tag?: string;
   limit?: number;
 };
 
@@ -146,6 +150,7 @@ function packageMatches(pkg: PackageRecord, query: string) {
     pkg.displayName,
     pkg.summary ?? "",
     pkg.ownerHandle ?? "",
+    ...(pkg.topics ?? []),
     ...(pkg.capabilityTags ?? []),
   ].some((value) => value.toLowerCase().includes(q));
 }
@@ -156,8 +161,17 @@ function scorePackage(pkg: PackageRecord, query: string) {
   if (pkg.name.toLowerCase() === q) return 100;
   if (pkg.name.toLowerCase().includes(q)) return 80;
   if (pkg.displayName.toLowerCase().includes(q)) return 60;
+  if ((pkg.topics ?? []).some((tag) => tag.toLowerCase() === q)) return 50;
   if ((pkg.summary ?? "").toLowerCase().includes(q)) return 30;
   return 10;
+}
+
+function normalizeTopic(value: string) {
+  return value.trim().toLowerCase().replace(/^#/, "");
+}
+
+export function normalizeTopics(values: string[] = []) {
+  return [...new Set(values.map(normalizeTopic).filter(Boolean))];
 }
 
 export function defaultFilesFor(input: PublishPackageInput) {
@@ -401,6 +415,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     const filtered = this.sortedPackages().filter((pkg) => {
       if (options.family && pkg.family !== options.family) return false;
       if (options.families?.length && !options.families.includes(pkg.family)) return false;
+      if (options.owner && normalizeKey(pkg.ownerHandle ?? "") !== normalizeKey(options.owner)) return false;
+      if (options.tag && !(pkg.topics ?? []).includes(normalizeTopic(options.tag))) return false;
       if (options.q && !packageMatches(pkg, options.q)) return false;
       return true;
     });
@@ -418,6 +434,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       .filter((pkg) => {
         if (options.family && pkg.family !== options.family) return false;
         if (options.families?.length && !options.families.includes(pkg.family)) return false;
+        if (options.owner && normalizeKey(pkg.ownerHandle ?? "") !== normalizeKey(options.owner)) return false;
+        if (options.tag && !(pkg.topics ?? []).includes(normalizeTopic(options.tag))) return false;
         return packageMatches(pkg, options.q);
       })
       .map((pkg) => ({ score: scorePackage(pkg, options.q), package: toPackageListItem(pkg) }))
@@ -446,6 +464,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       }
     }
     const capabilities = normalizeCapabilities(input, compatibility);
+    const topics = normalizeTopics(input.tags);
     const key = normalizeKey(input.name);
     const version = createPackageVersion({ payload: input, compatibility, capabilities });
     const existing = this.packages.get(key);
@@ -465,6 +484,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       existing.capabilities = capabilities;
       existing.capabilityTags = capabilities?.capabilityTags;
       existing.executesCode = capabilities?.executesCode;
+      existing.topics = topics;
       existing.stats.versions = existing.versions.length;
       return existing;
     }
@@ -478,6 +498,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       isOfficial: input.channel === "official",
       summary: input.summary ?? null,
       ownerHandle: input.ownerHandle ?? owner.handle,
+      topics,
       createdAt: version.createdAt,
       updatedAt: version.createdAt,
       latestVersion: version.version,

@@ -59,6 +59,7 @@ export type PackageListItem = {
   isOfficial: boolean;
   summary?: string | null;
   ownerHandle?: string | null;
+  topics?: string[];
   createdAt: number;
   updatedAt: number;
   latestVersion?: string | null;
@@ -193,6 +194,7 @@ export function toPackageListItem(record: PackageRecord): PackageListItem {
     isOfficial: record.isOfficial,
     summary: record.summary,
     ownerHandle: record.ownerHandle,
+    topics: record.topics,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     latestVersion: record.latestVersion,

@@ -254,6 +254,25 @@ describe("registry api", () => {
     const detail = await app.inject("/api/v1/packages/%40openkova%2Fcontext-bridge");
     expect(detail.statusCode).toBe(200);
     expect(detail.json().package.compatibility.pluginApiRange).toBe("^1.0.0");
+    expect(detail.json().package.topics).toEqual(["context", "gateway"]);
+
+    const topicList = await app.inject("/api/v1/packages?tag=context");
+    expect(topicList.statusCode).toBe(200);
+    expect(topicList.json().items.map((item: { name: string }) => item.name)).toContain("@openkova/context-bridge");
+
+    const topicRoute = await app.inject("/api/v1/tags/gateway/packages");
+    expect(topicRoute.statusCode).toBe(200);
+    expect(topicRoute.json().items.map((item: { name: string }) => item.name)).toContain("@openkova/context-bridge");
+
+    const publisherRoute = await app.inject("/api/v1/publishers/openkova/packages");
+    expect(publisherRoute.statusCode).toBe(200);
+    expect(publisherRoute.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ownerHandle: "openkova",
+        }),
+      ]),
+    );
 
     const versions = await app.inject("/api/v1/packages/%40openkova%2Fcontext-bridge/versions");
     expect(versions.statusCode).toBe(200);
@@ -331,6 +350,7 @@ describe("registry api", () => {
           pluginApi: "^1.0.0",
           minGatewayVersion: "2026.3.0",
         },
+        tags: ["demo", "gateway"],
         files: [
           {
             path: "package.json",
@@ -342,6 +362,7 @@ describe("registry api", () => {
     });
     expect(publish.statusCode).toBe(201);
     expect(publish.json().package.latestVersion).toBe("0.1.0");
+    expect(publish.json().package.topics).toEqual(["demo", "gateway"]);
 
     const version = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/versions/0.1.0");
     expect(version.statusCode).toBe(200);
