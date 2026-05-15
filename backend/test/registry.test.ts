@@ -197,9 +197,35 @@ describe("registry api", () => {
     const body = search.json<{ results: Array<{ package: { name: string } }> }>();
     expect(body.results[0]?.package.name).toBe("@openkova/context-bridge");
 
+    const plugins = await app.inject("/api/v1/plugins?limit=10");
+    expect(plugins.statusCode).toBe(200);
+    expect(plugins.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "@openkova/context-bridge",
+          family: "code-plugin",
+        }),
+      ]),
+    );
+
+    const pluginSearch = await app.inject("/api/v1/plugins/search?q=context");
+    expect(pluginSearch.statusCode).toBe(200);
+    expect(pluginSearch.json().results[0].package.family).toBe("code-plugin");
+
+    const codePlugins = await app.inject("/api/v1/code-plugins?limit=10");
+    expect(codePlugins.statusCode).toBe(200);
+    expect(codePlugins.json().items.every((item: { family: string }) => item.family === "code-plugin")).toBe(true);
+
     const detail = await app.inject("/api/v1/packages/%40openkova%2Fcontext-bridge");
     expect(detail.statusCode).toBe(200);
     expect(detail.json().package.compatibility.pluginApiRange).toBe("^1.0.0");
+
+    const versions = await app.inject("/api/v1/packages/%40openkova%2Fcontext-bridge/versions");
+    expect(versions.statusCode).toBe(200);
+    expect(versions.json().items[0]).toMatchObject({
+      version: "0.1.0",
+      distTags: ["latest"],
+    });
     await app.close();
   });
 
@@ -235,6 +261,13 @@ describe("registry api", () => {
       latestVersion: {
         version: "1.0.0",
       },
+    });
+
+    const versions = await app.inject("/api/v1/skills/release-notes-sherpa/versions");
+    expect(versions.statusCode).toBe(200);
+    expect(versions.json().items[0]).toMatchObject({
+      version: "1.0.0",
+      distTags: ["latest"],
     });
 
     const download = await app.inject("/api/v1/download?slug=release-notes-sherpa&version=1.0.0");

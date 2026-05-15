@@ -423,6 +423,9 @@ export class PostgresRegistryRepository implements RegistryRepository {
     const where: string[] = [];
 
     if (options.family) where.push(`p.family = ${addParam(params, options.family)}::package_family`);
+    if (!options.family && options.families?.length) {
+      where.push(`p.family = any(${addParam(params, options.families)}::package_family[])`);
+    }
     if (options.q?.trim() && options.q.trim() !== "*") {
       where.push(packageSearchPredicate(addParam(params, options.q.trim())));
     }
@@ -445,13 +448,16 @@ export class PostgresRegistryRepository implements RegistryRepository {
     };
   }
 
-  async searchPackages(options: { q: string; family?: PackageFamily; limit?: number }) {
+  async searchPackages(options: { q: string; family?: PackageFamily; families?: PackageFamily[]; limit?: number }) {
     const limit = clampLimit(options.limit, 20);
     const params: unknown[] = [];
     const where: string[] = [];
     let scoreExpression = "1";
 
     if (options.family) where.push(`p.family = ${addParam(params, options.family)}::package_family`);
+    if (!options.family && options.families?.length) {
+      where.push(`p.family = any(${addParam(params, options.families)}::package_family[])`);
+    }
     if (options.q.trim() && options.q.trim() !== "*") {
       const qParam = addParam(params, options.q.trim());
       where.push(packageSearchPredicate(qParam));

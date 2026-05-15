@@ -97,11 +97,19 @@ Registry-compatible read routes:
 - `GET /api/v1/packages`
 - `GET /api/v1/packages/search?q=...`
 - `GET /api/v1/packages/:name`
+- `GET /api/v1/packages/:name/versions`
 - `GET /api/v1/packages/:name/versions/:version`
 - `GET /api/v1/packages/:name/download?version=...`
+- `GET /api/v1/plugins`
+- `GET /api/v1/plugins/search?q=...`
+- `GET /api/v1/code-plugins`
+- `GET /api/v1/code-plugins/search?q=...`
+- `GET /api/v1/bundle-plugins`
+- `GET /api/v1/bundle-plugins/search?q=...`
 - `GET /api/v1/search?q=...`
 - `GET /api/v1/skills`
 - `GET /api/v1/skills/:slug`
+- `GET /api/v1/skills/:slug/versions`
 - `GET /api/v1/download?slug=...&version=...`
 
 Auth and publish routes:

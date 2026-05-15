@@ -28,6 +28,10 @@ const searchQuerySchema = z.object({
 const packageParamsSchema = z.object({ name: z.string().min(1) });
 const packageVersionParamsSchema = packageParamsSchema.extend({ version: z.string().min(1) });
 const skillParamsSchema = z.object({ slug: z.string().min(1) });
+const versionListQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).optional(),
+  cursor: z.string().optional(),
+});
 const downloadQuerySchema = z.object({
   version: z.string().optional(),
   tag: z.string().optional(),
@@ -35,6 +39,7 @@ const downloadQuerySchema = z.object({
 const skillDownloadQuerySchema = downloadQuerySchema.extend({
   slug: z.string().min(1),
 });
+const pluginFamilies: PackageFamily[] = ["code-plugin", "bundle-plugin"];
 
 function publicPackageDetail(pkg: PackageRecord) {
   return {
@@ -66,6 +71,15 @@ function publicVersionSummary(version: PackageVersionRecord) {
     capabilities: version.capabilities ?? null,
     verification: version.verification ?? null,
     sha256hash: version.sha256hash,
+  };
+}
+
+function publicVersionListItem(version: PackageVersionRecord) {
+  return {
+    version: version.version,
+    createdAt: version.createdAt,
+    changelog: version.changelog,
+    distTags: version.distTags,
   };
 }
 
@@ -135,6 +149,17 @@ function parseFamily(value: unknown): PackageFamily | undefined {
   return packageFamilies.find((family) => family === value);
 }
 
+function paginatedVersionList(versions: PackageVersionRecord[], query: z.infer<typeof versionListQuerySchema>) {
+  const limit = Math.min(Math.max(query.limit ?? 50, 1), 100);
+  const offset = query.cursor ? Number.parseInt(query.cursor, 10) || 0 : 0;
+  const page = versions.slice(offset, offset + limit);
+  const nextOffset = offset + page.length;
+  return {
+    items: page.map(publicVersionListItem),
+    nextCursor: nextOffset < versions.length ? String(nextOffset) : null,
+  };
+}
+
 function parseJsonField(value: string, fieldName: string) {
   try {
     return JSON.parse(value) as unknown;
@@ -199,6 +224,38 @@ async function parseMultipartPublishInput(request: FastifyRequest) {
   return preparePublishInputFromArchive({ archive, metadata });
 }
 
+async function listPackageCatalog(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  repo: RegistryRepository,
+  filter: { family?: PackageFamily; families?: PackageFamily[] } = {},
+) {
+  const parsed = listQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    reply.code(400);
+    return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
+  }
+  const options = { ...parsed.data, ...filter };
+  if (filter.families) delete options.family;
+  return repo.listPackages(options);
+}
+
+async function searchPackageCatalog(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  repo: RegistryRepository,
+  filter: { family?: PackageFamily; families?: PackageFamily[] } = {},
+) {
+  const parsed = searchQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    reply.code(400);
+    return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
+  }
+  const options = { ...parsed.data, ...filter };
+  if (filter.families) delete options.family;
+  return { results: await repo.searchPackages(options) };
+}
+
 export async function registerRegistryRoutes(app: FastifyInstance, repo: RegistryRepository) {
   app.get("/healthz", async () => ({
     ok: true,
@@ -216,21 +273,35 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
   }));
 
   app.get("/api/v1/packages", async (request, reply) => {
-    const parsed = listQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      reply.code(400);
-      return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
-    }
-    return repo.listPackages(parsed.data);
+    return listPackageCatalog(request, reply, repo);
   });
 
   app.get("/api/v1/packages/search", async (request, reply) => {
-    const parsed = searchQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      reply.code(400);
-      return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
-    }
-    return { results: await repo.searchPackages(parsed.data) };
+    return searchPackageCatalog(request, reply, repo);
+  });
+
+  app.get("/api/v1/plugins", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { families: pluginFamilies });
+  });
+
+  app.get("/api/v1/plugins/search", async (request, reply) => {
+    return searchPackageCatalog(request, reply, repo, { families: pluginFamilies });
+  });
+
+  app.get("/api/v1/code-plugins", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { family: "code-plugin" });
+  });
+
+  app.get("/api/v1/code-plugins/search", async (request, reply) => {
+    return searchPackageCatalog(request, reply, repo, { family: "code-plugin" });
+  });
+
+  app.get("/api/v1/bundle-plugins", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { family: "bundle-plugin" });
+  });
+
+  app.get("/api/v1/bundle-plugins/search", async (request, reply) => {
+    return searchPackageCatalog(request, reply, repo, { family: "bundle-plugin" });
   });
 
   app.post("/api/v1/packages", async (request, reply) => {
@@ -274,6 +345,21 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { package: null, owner: null };
     }
     return publicPackageDetail(pkg);
+  });
+
+  app.get("/api/v1/packages/:name/versions", async (request, reply) => {
+    const params = packageParamsSchema.safeParse(request.params);
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      reply.code(400);
+      return { error: "Invalid package version list request." };
+    }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg) {
+      reply.code(404);
+      return { items: [], nextCursor: null };
+    }
+    return paginatedVersionList(pkg.versions, query.data);
   });
 
   app.get("/api/v1/packages/:name/versions/:version", async (request, reply) => {
@@ -362,6 +448,21 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { skill: null, latestVersion: null, owner: null };
     }
     return publicSkillDetail(pkg);
+  });
+
+  app.get("/api/v1/skills/:slug/versions", async (request, reply) => {
+    const params = skillParamsSchema.safeParse(request.params);
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      reply.code(400);
+      return { error: "Invalid skill version list request." };
+    }
+    const pkg = await repo.getPackage(params.data.slug);
+    if (!pkg || pkg.family !== "skill") {
+      reply.code(404);
+      return { items: [], nextCursor: null };
+    }
+    return paginatedVersionList(pkg.versions, query.data);
   });
 
   app.get("/api/v1/download", async (request, reply) => {

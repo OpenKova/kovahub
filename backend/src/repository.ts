@@ -41,8 +41,16 @@ export type ApiTokenRecord = {
 export type ListPackagesOptions = {
   q?: string;
   family?: PackageFamily;
+  families?: PackageFamily[];
   limit?: number;
   cursor?: string;
+};
+
+export type SearchPackagesOptions = {
+  q: string;
+  family?: PackageFamily;
+  families?: PackageFamily[];
+  limit?: number;
 };
 
 export type RegistryRepository = {
@@ -63,7 +71,7 @@ export type RegistryRepository = {
   revokeApiToken(input: { userId: string; tokenId: string }): Promise<boolean>;
   findUserByApiTokenHash(tokenHash: string): Promise<AuthPrincipal | null>;
   listPackages(options?: ListPackagesOptions): Promise<{ items: PackageListItem[]; nextCursor: string | null }>;
-  searchPackages(options: { q: string; family?: PackageFamily; limit?: number }): Promise<Array<{ score: number; package: PackageListItem }>>;
+  searchPackages(options: SearchPackagesOptions): Promise<Array<{ score: number; package: PackageListItem }>>;
   getPackage(name: string): Promise<PackageRecord | null>;
   getPackageVersion(name: string, version: string): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   publishPackage(input: PreparedPublishPackageInput, owner: AuthPrincipal): Promise<PackageRecord>;
@@ -392,6 +400,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
     const filtered = this.sortedPackages().filter((pkg) => {
       if (options.family && pkg.family !== options.family) return false;
+      if (options.families?.length && !options.families.includes(pkg.family)) return false;
       if (options.q && !packageMatches(pkg, options.q)) return false;
       return true;
     });
@@ -403,10 +412,14 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     };
   }
 
-  async searchPackages(options: { q: string; family?: PackageFamily; limit?: number }) {
+  async searchPackages(options: SearchPackagesOptions) {
     const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
     return this.sortedPackages()
-      .filter((pkg) => (!options.family || pkg.family === options.family) && packageMatches(pkg, options.q))
+      .filter((pkg) => {
+        if (options.family && pkg.family !== options.family) return false;
+        if (options.families?.length && !options.families.includes(pkg.family)) return false;
+        return packageMatches(pkg, options.q);
+      })
       .map((pkg) => ({ score: scorePackage(pkg, options.q), package: toPackageListItem(pkg) }))
       .sort((left, right) => right.score - left.score || right.package.updatedAt - left.package.updatedAt)
       .slice(0, limit);
