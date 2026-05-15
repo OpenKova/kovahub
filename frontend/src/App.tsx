@@ -1,25 +1,31 @@
 import {
   ArrowDownToLine,
+  ArrowRight,
   Boxes,
   CheckCircle2,
   Code2,
   Copy,
+  Download,
   FileArchive,
   Github,
   History,
   KeyRound,
+  Monitor,
+  Moon,
   Package,
   Plug,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
+  Sun,
   Trash2,
   UploadCloud,
   UserRound,
+  Users,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   clearToken,
   createApiToken,
@@ -79,6 +85,12 @@ function formatDate(value: number) {
   );
 }
 
+function formatCount(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
 function safeLocalPath(value: string | null) {
   if (value?.startsWith("/") && !value.startsWith("//")) return value;
   return "/publish";
@@ -88,10 +100,22 @@ function packageRoute(name: string) {
   return `/packages/${encodeURIComponent(name)}`;
 }
 
+function marketplaceRoute(params: { q?: string; family?: PackageFamily } = {}) {
+  const query = new URLSearchParams();
+  if (params.q?.trim()) query.set("q", params.q.trim());
+  if (params.family) query.set("family", params.family);
+  const suffix = query.toString();
+  return `/marketplace${suffix ? `?${suffix}` : ""}`;
+}
+
 function useRoutePackageName() {
   const params = useParams();
   const wildcard = params["*"];
   return wildcard ? decodeURIComponent(wildcard) : null;
+}
+
+function parseRouteFamily(value: string | null): PackageFamily | "all" {
+  return value && value in familyLabels ? (value as PackageFamily) : "all";
 }
 
 function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => void }) {
@@ -107,7 +131,7 @@ function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => v
           <span>KovaHub</span>
         </Link>
         <nav className="nav-links" aria-label="Primary">
-          <Link to="/">Marketplace</Link>
+          <Link to="/marketplace">Marketplace</Link>
           <a href={`${getApiBase()}/api/v1/meta`}>Registry API</a>
           <Link to="/publish">Publish</Link>
         </nav>
@@ -757,18 +781,319 @@ function PublishPanel({
   );
 }
 
+function LandingHeader({
+  user,
+  onSignOut,
+  onSearch,
+}: {
+  user: AuthUser | null;
+  onSignOut: () => void;
+  onSearch: (query: string) => void;
+}) {
+  const [navQuery, setNavQuery] = useState("");
+  const returnTo = `${window.location.pathname}${window.location.search}`;
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    onSearch(navQuery);
+  }
+
+  return (
+    <header className="home-nav">
+      <div className="home-nav-primary">
+        <Link className="home-brand" to="/">
+          <span className="home-brand-mark">
+            <img src={kovaRoboLogo} alt="" aria-hidden="true" />
+          </span>
+          <span>KovaHub</span>
+        </Link>
+
+        <form className="home-nav-search" onSubmit={submit}>
+          <Search size={18} aria-hidden="true" />
+          <input
+            value={navQuery}
+            onChange={(event) => setNavQuery(event.target.value)}
+            placeholder="Search skills and plugins"
+          />
+        </form>
+
+        <div className="home-nav-actions">
+          <div className="home-theme-toggle" aria-label="Theme mode">
+            <button type="button" aria-label="System theme">
+              <Monitor size={15} aria-hidden="true" />
+            </button>
+            <button type="button" aria-label="Light theme">
+              <Sun size={15} aria-hidden="true" />
+            </button>
+            <button type="button" aria-label="Dark theme">
+              <Moon size={15} aria-hidden="true" />
+            </button>
+          </div>
+          {user ? (
+            <div className="home-user-chip">
+              <UserRound size={15} aria-hidden="true" />
+              <span>@{user.handle}</span>
+              <button type="button" onClick={onSignOut}>
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <a className="home-github-button" href={githubLoginUrl(returnTo)}>
+              <Github size={16} aria-hidden="true" />
+              Sign in with GitHub
+            </a>
+          )}
+        </div>
+      </div>
+
+      <nav className="home-nav-secondary" aria-label="Marketplace sections">
+        <Link to={marketplaceRoute({ family: "skill" })}>
+          <Sparkles size={14} aria-hidden="true" />
+          Skills
+        </Link>
+        <Link to={marketplaceRoute({ family: "code-plugin" })}>
+          <Plug size={14} aria-hidden="true" />
+          Plugins
+        </Link>
+        <Link to="/publish">Publishers</Link>
+        <a href={`${getApiBase()}/api/v1/meta`}>Docs</a>
+      </nav>
+    </header>
+  );
+}
+
+function HomePackageCard({ item }: { item: PackageListItem }) {
+  const Icon = familyIcons[item.family];
+  const owner = item.ownerHandle ? `by ${item.ownerHandle}` : "by kova builders";
+  const latest = item.latestVersion ? `v${item.latestVersion}` : "No version";
+
+  return (
+    <Link to={packageRoute(item.name)} className="home-v2-c-card">
+      <div className="home-v2-c-head">
+        <div className="home-v2-c-icon">
+          <Icon size={18} aria-hidden="true" />
+        </div>
+        <div className="home-v2-c-meta">
+          <div className="home-v2-c-name">{item.displayName}</div>
+          <div className="home-v2-c-by">{owner}</div>
+        </div>
+      </div>
+      <span className="home-v2-c-tag">{familyLabels[item.family]}</span>
+      <div className="home-v2-c-desc">{item.summary ?? "A Kova-compatible package."}</div>
+      <div className="home-v2-c-footer">
+        <div className="home-v2-c-stats">
+          <span>
+            <History size={12} aria-hidden="true" /> {latest}
+          </span>
+          <span>
+            <Download size={12} aria-hidden="true" /> Archive
+          </span>
+        </div>
+        <span className="home-v2-c-install">
+          <Download size={13} aria-hidden="true" /> Install
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function HomeLanding() {
+  const navigate = useNavigate();
+  const [packages, setPackages] = useState<PackageListItem[]>([]);
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    fetchPackages({}).then((page) => setPackages(page.items)).catch(() => setPackages([]));
+  }, []);
+
+  useEffect(() => {
+    if (!getStoredToken()) return;
+    fetchMe()
+      .then((result) => setUser(result.user))
+      .catch(() => clearToken());
+  }, []);
+
+  const featured = packages.slice(0, 6);
+  const pluginCount = packages.filter((item) => item.family !== "skill").length;
+  const skillCount = packages.filter((item) => item.family === "skill").length;
+
+  function runSearch(value: string) {
+    navigate(marketplaceRoute({ q: value }));
+  }
+
+  function submitHeroSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    runSearch(String(form.get("q") ?? ""));
+  }
+
+  return (
+    <div className="home-page">
+      <LandingHeader
+        user={user}
+        onSignOut={() => {
+          clearToken();
+          setUser(null);
+        }}
+        onSearch={runSearch}
+      />
+
+      <main className="home-v2-main">
+        <section className="home-v2-hero">
+          <div className="home-v2-hero-bg">
+            <div className="home-v2-glow" />
+            <div className="home-v2-dots" />
+            <div className="home-v2-ring home-v2-ring-1" />
+            <div className="home-v2-ring home-v2-ring-2" />
+            <div className="home-v2-ring home-v2-ring-3" />
+          </div>
+
+          <p className="home-v2-hero-label">BUILT BY THE COMMUNITY.</p>
+          <h1 className="home-v2-headline">
+            <span className="home-v2-headline-inner">
+              <span className="home-v2-action-word">Equip</span>
+              <span className="home-v2-sep" />
+              <span className="home-v2-action-word">Install</span>
+              <span className="home-v2-sep" />
+              <span className="home-v2-cycle-wrap">
+                <span className="home-v2-cycle-track">
+                  <span className="home-v2-cycle-word">Unleash.</span>
+                  <span className="home-v2-cycle-word">Ship.</span>
+                  <span className="home-v2-cycle-word">Build.</span>
+                  <span className="home-v2-cycle-word">Create.</span>
+                  <span className="home-v2-cycle-word">Unleash.</span>
+                </span>
+              </span>
+            </span>
+          </h1>
+          <p className="home-v2-sub">Kova tools built by builders, ready in one search.</p>
+
+          <div className="home-v2-search-container">
+            <form className="home-v2-search-bar" onSubmit={submitHeroSearch}>
+              <Search className="home-v2-search-icon" size={20} aria-hidden="true" />
+              <input name="q" type="text" placeholder="What are you looking for?" />
+              <button type="submit" className="home-v2-search-go" aria-label="Search">
+                <span className="home-v2-search-go-label">Search</span>
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            </form>
+          </div>
+
+          <div className="home-v2-suggestions">
+            {["Kova gateway", "GitHub integration", "plugin API", "dashboard builder"].map((term) => (
+              <button type="button" className="home-v2-suggestion" key={term} onClick={() => runSearch(term)}>
+                {term}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="home-v2-carousel-section">
+          <div className="home-v2-carousel-header">
+            <h2>Featured packages</h2>
+            <div className="home-v2-carousel-controls">
+              <Link className="home-v2-section-link" to="/marketplace">
+                View all <ArrowRight size={14} aria-hidden="true" />
+              </Link>
+            </div>
+          </div>
+          <div className="home-v2-carousel-wrap">
+            <div className="home-v2-carousel-track">
+              {(featured.length > 0 ? [...featured, ...featured] : []).map((item, index) => (
+                <HomePackageCard item={item} key={`${item.name}-${index}`} />
+              ))}
+              {featured.length === 0
+                ? [0, 1, 2, 3].map((index) => <div className="home-v2-c-card home-v2-c-card-empty" key={index} />)
+                : null}
+            </div>
+          </div>
+        </section>
+
+        <section className="home-v2-categories">
+          <div className="home-v2-categories-grid">
+            <Link to={marketplaceRoute({ family: "skill" })} className="home-v2-cat-item">
+              <div className="home-v2-cat-icon">
+                <Sparkles size={20} aria-hidden="true" />
+              </div>
+              <div className="home-v2-cat-text">
+                <div className="home-v2-cat-name">Skills</div>
+                <div className="home-v2-cat-desc">Agent skill bundles</div>
+              </div>
+              <span className="home-v2-cat-arrow">
+                <ArrowRight size={16} aria-hidden="true" />
+              </span>
+            </Link>
+            <Link to={marketplaceRoute({ family: "code-plugin" })} className="home-v2-cat-item">
+              <div className="home-v2-cat-icon">
+                <Code2 size={20} aria-hidden="true" />
+              </div>
+              <div className="home-v2-cat-text">
+                <div className="home-v2-cat-name">Plugins</div>
+                <div className="home-v2-cat-desc">Gateway plugins</div>
+              </div>
+              <span className="home-v2-cat-arrow">
+                <ArrowRight size={16} aria-hidden="true" />
+              </span>
+            </Link>
+            <Link to="/publish" className="home-v2-cat-item">
+              <div className="home-v2-cat-icon">
+                <Users size={20} aria-hidden="true" />
+              </div>
+              <div className="home-v2-cat-text">
+                <div className="home-v2-cat-name">Publishers</div>
+                <div className="home-v2-cat-desc">Builders and orgs</div>
+              </div>
+              <span className="home-v2-cat-arrow">
+                <ArrowRight size={16} aria-hidden="true" />
+              </span>
+            </Link>
+          </div>
+        </section>
+
+        <div className="home-v2-proof-bar">
+          <div className="home-v2-proof-item">
+            <span className="home-v2-proof-num">{formatCount(packages.length)}</span>
+            <span className="home-v2-proof-label">tools</span>
+          </div>
+          <span className="home-v2-proof-sep" />
+          <div className="home-v2-proof-item">
+            <span className="home-v2-proof-num">{formatCount(pluginCount)}</span>
+            <span className="home-v2-proof-label">plugins</span>
+          </div>
+          <span className="home-v2-proof-sep" />
+          <div className="home-v2-proof-item">
+            <span className="home-v2-proof-num">{formatCount(skillCount)}</span>
+            <span className="home-v2-proof-label">skills</span>
+          </div>
+          <span className="home-v2-proof-sep" />
+          <div className="home-v2-proof-item">
+            <span className="home-v2-proof-num">Kova</span>
+            <span className="home-v2-proof-label">ready</span>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const routeName = useRoutePackageName();
   const [packages, setPackages] = useState<PackageListItem[]>([]);
   const [detail, setDetail] = useState<PackageDetail | null>(null);
-  const [query, setQuery] = useState("");
-  const [family, setFamily] = useState<PackageFamily | "all">("all");
+  const [query, setQuery] = useState(searchParams.get("q") ?? "");
+  const [family, setFamily] = useState<PackageFamily | "all">(parseRouteFamily(searchParams.get("family")));
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const activeName = routeName ?? packages[0]?.name ?? null;
+
+  useEffect(() => {
+    setQuery(searchParams.get("q") ?? "");
+    setFamily(parseRouteFamily(searchParams.get("family")));
+  }, [searchParams]);
 
   const loadPackages = useCallback(async () => {
     setLoading(true);
@@ -809,7 +1134,10 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
 
   function searchSubmit(event: FormEvent) {
     event.preventDefault();
-    void loadPackages();
+    const next = new URLSearchParams();
+    if (query.trim()) next.set("q", query.trim());
+    if (family !== "all") next.set("family", family);
+    setSearchParams(next);
   }
 
   const visibleMeta = useMemo(() => {
@@ -855,7 +1183,13 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
                   className={family === value ? "is-active" : ""}
                   type="button"
                   key={value}
-                  onClick={() => setFamily(value)}
+                  onClick={() => {
+                    setFamily(value);
+                    const next = new URLSearchParams(searchParams);
+                    if (value === "all") next.delete("family");
+                    else next.set("family", value);
+                    setSearchParams(next);
+                  }}
                 >
                   {value === "all" ? "All" : familyLabels[value]}
                 </button>
@@ -899,7 +1233,8 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Marketplace />} />
+      <Route path="/" element={<HomeLanding />} />
+      <Route path="/marketplace" element={<Marketplace />} />
       <Route path="/packages/*" element={<Marketplace />} />
       <Route path="/publish" element={<Marketplace publishMode />} />
       <Route path="/auth/github/callback" element={<GitHubAuthCallback />} />
