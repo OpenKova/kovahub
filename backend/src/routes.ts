@@ -196,8 +196,8 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
 
   app.get("/api/v1/meta", async () => ({
     name: "KovaHub",
-    registry: process.env.KOVAHUB_REGISTRY_URL ?? "http://localhost:8787",
-    site: process.env.KOVAHUB_SITE_URL ?? "http://localhost:5173",
+    registry: process.env.KOVAHUB_REGISTRY ?? process.env.KOVAHUB_REGISTRY_URL ?? "http://localhost:8787",
+    site: process.env.KOVAHUB_SITE ?? process.env.KOVAHUB_SITE_URL ?? "http://localhost:5173",
     compatibility: {
       env: ["KOVAHUB_REGISTRY", "KOVAHUB_SITE"],
       packageCompatibilityFields: ["pluginApiRange", "minGatewayVersion"],
