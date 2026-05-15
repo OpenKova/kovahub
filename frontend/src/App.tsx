@@ -203,12 +203,22 @@ function packageRoute(name: string) {
   return `/packages/${encodeURIComponent(name)}`;
 }
 
-function marketplaceRoute(params: { q?: string; family?: PackageFamily } = {}) {
+function marketplaceRoute(params: { q?: string; family?: PackageFamily; owner?: string; tag?: string } = {}) {
   const query = new URLSearchParams();
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.family) query.set("family", params.family);
+  if (params.owner?.trim()) query.set("owner", params.owner.trim());
+  if (params.tag?.trim()) query.set("tag", params.tag.trim());
   const suffix = query.toString();
   return `/marketplace${suffix ? `?${suffix}` : ""}`;
+}
+
+function publisherRoute(handle: string) {
+  return `/publishers/${encodeURIComponent(handle)}`;
+}
+
+function tagRoute(tag: string) {
+  return `/tags/${encodeURIComponent(tag)}`;
 }
 
 function useRoutePackageName() {
@@ -219,6 +229,10 @@ function useRoutePackageName() {
 
 function parseRouteFamily(value: string | null): PackageFamily | "all" {
   return value && value in familyLabels ? (value as PackageFamily) : "all";
+}
+
+function topicsFor(item: Pick<PackageListItem, "topics">) {
+  return item.topics?.filter(Boolean) ?? [];
 }
 
 const fallbackSkillCards: HomeCardItem[] = [
@@ -514,6 +528,7 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
   const compatibility = pkg.compatibility;
   const capabilities = pkg.capabilities;
   const tags = Object.entries(pkg.tags ?? {});
+  const topics = topicsFor(pkg);
   const versions = pkg.versions ?? [];
 
   return (
@@ -533,6 +548,16 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
       </div>
 
       <p className="detail-summary">{pkg.summary ?? "No summary published yet."}</p>
+
+      {topics.length > 0 ? (
+        <div className="topic-row" aria-label="Package topics">
+          {topics.map((topic) => (
+            <Link className="topic-link" to={tagRoute(topic)} key={topic}>
+              #{topic}
+            </Link>
+          ))}
+        </div>
+      ) : null}
 
       <div className="stat-grid">
         <div>
@@ -1488,6 +1513,7 @@ function LandingPageShell({ theme, children }: { theme: ThemeSettings; children:
 
 function DirectoryPackageCard({ item }: { item: PackageListItem }) {
   const Icon = familyIcons[item.family];
+  const topics = topicsFor(item).slice(0, 2);
 
   return (
     <Link to={packageRoute(item.name)} className="directory-card">
@@ -1504,6 +1530,9 @@ function DirectoryPackageCard({ item }: { item: PackageListItem }) {
       <div className="directory-card-meta">
         <span>{familyLabels[item.family]}</span>
         {item.latestVersion ? <span>v{item.latestVersion}</span> : null}
+        {topics.map((topic) => (
+          <span key={topic}>#{topic}</span>
+        ))}
         <span>{formatDate(item.updatedAt)}</span>
       </div>
     </Link>
@@ -1610,7 +1639,7 @@ function PublishersPage({ theme }: { theme: ThemeSettings }) {
           {publishers.map((publisher) => (
             <Link
               className="publisher-card"
-              to={marketplaceRoute({ q: publisher.handle })}
+              to={publisherRoute(publisher.handle)}
               key={publisher.handle}
             >
               <span className="publisher-avatar">
@@ -1624,6 +1653,128 @@ function PublishersPage({ theme }: { theme: ThemeSettings }) {
               </div>
               <ArrowRight size={16} aria-hidden="true" />
             </Link>
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
+function PublisherDetailPage({ theme }: { theme: ThemeSettings }) {
+  const { handle = "" } = useParams();
+  const [packages, setPackages] = useState<PackageListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const plugins = packages.filter((item) => item.family !== "skill").length;
+  const skills = packages.filter((item) => item.family === "skill").length;
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchPackages({ owner: handle, limit: 100 })
+      .then((page) => {
+        if (active) setPackages(page.items);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load publisher packages.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [handle]);
+
+  return (
+    <LandingPageShell theme={theme}>
+      <section className="content-hero">
+        <p>PUBLISHER</p>
+        <h1>@{handle}</h1>
+        <span>
+          {packages.length} Kova-compatible packages · {plugins} plugins · {skills} skills
+        </span>
+        <div className="content-actions">
+          <Link className="content-primary-action" to={marketplaceRoute({ owner: handle })}>
+            Search publisher <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+          <Link className="content-secondary-action" to="/publishers">
+            All publishers
+          </Link>
+        </div>
+      </section>
+
+      <section className="content-section">
+        <div className="content-section-head">
+          <h2>Published packages</h2>
+          <span>{packages.length} listed</span>
+        </div>
+        {loading ? <p className="content-muted">Loading publisher packages...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        {!loading && packages.length === 0 ? <p className="content-muted">No packages found for this publisher.</p> : null}
+        <div className="directory-grid">
+          {packages.map((item) => (
+            <DirectoryPackageCard item={item} key={item.name} />
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
+function TagPage({ theme }: { theme: ThemeSettings }) {
+  const { tag = "" } = useParams();
+  const [packages, setPackages] = useState<PackageListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchPackages({ tag, limit: 100 })
+      .then((page) => {
+        if (active) setPackages(page.items);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load tag packages.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [tag]);
+
+  return (
+    <LandingPageShell theme={theme}>
+      <section className="content-hero">
+        <p>TOPIC</p>
+        <h1>#{tag}</h1>
+        <span>Packages tagged for this KovaHub discovery topic.</span>
+        <div className="content-actions">
+          <Link className="content-primary-action" to={marketplaceRoute({ tag })}>
+            Search topic <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+          <Link className="content-secondary-action" to="/marketplace">
+            Browse marketplace
+          </Link>
+        </div>
+      </section>
+
+      <section className="content-section">
+        <div className="content-section-head">
+          <h2>Tagged packages</h2>
+          <span>{packages.length} listed</span>
+        </div>
+        {loading ? <p className="content-muted">Loading tag packages...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        {!loading && packages.length === 0 ? <p className="content-muted">No packages found for this topic.</p> : null}
+        <div className="directory-grid">
+          {packages.map((item) => (
+            <DirectoryPackageCard item={item} key={item.name} />
           ))}
         </div>
       </section>
@@ -1684,32 +1835,46 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
   const [detail, setDetail] = useState<PackageDetail | null>(null);
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [family, setFamily] = useState<PackageFamily | "all">(parseRouteFamily(searchParams.get("family")));
+  const [ownerFilter, setOwnerFilter] = useState(searchParams.get("owner") ?? "");
+  const [tagFilter, setTagFilter] = useState(searchParams.get("tag") ?? "");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   const activeName = routeName ?? packages[0]?.name ?? null;
 
   useEffect(() => {
     setQuery(searchParams.get("q") ?? "");
     setFamily(parseRouteFamily(searchParams.get("family")));
+    setOwnerFilter(searchParams.get("owner") ?? "");
+    setTagFilter(searchParams.get("tag") ?? "");
   }, [searchParams]);
 
-  const loadPackages = useCallback(async () => {
-    setLoading(true);
+  const loadPackages = useCallback(async (cursor?: string | null) => {
+    const append = Boolean(cursor);
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     setError(null);
     try {
       const page = await fetchPackages({
         q: query.trim() || undefined,
         family: family === "all" ? undefined : family,
+        owner: ownerFilter.trim() || undefined,
+        tag: tagFilter.trim() || undefined,
+        cursor,
+        limit: 20,
       });
-      setPackages(page.items);
+      setPackages((current) => (append ? [...current, ...page.items] : page.items));
+      setNextCursor(page.nextCursor);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load packages.");
     } finally {
-      setLoading(false);
+      if (append) setLoadingMore(false);
+      else setLoading(false);
     }
-  }, [family, query]);
+  }, [family, ownerFilter, query, tagFilter]);
 
   useEffect(() => {
     void loadPackages();
@@ -1737,6 +1902,15 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
     const next = new URLSearchParams();
     if (query.trim()) next.set("q", query.trim());
     if (family !== "all") next.set("family", family);
+    if (ownerFilter.trim()) next.set("owner", ownerFilter.trim());
+    if (tagFilter.trim()) next.set("tag", tagFilter.trim());
+    setSearchParams(next);
+  }
+
+  function clearDiscoveryFilters() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("owner");
+    next.delete("tag");
     setSearchParams(next);
   }
 
@@ -1800,6 +1974,15 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
               <span>{visibleMeta.plugins} plugins</span>
               <span>{visibleMeta.skills} skills</span>
             </div>
+            {ownerFilter || tagFilter ? (
+              <div className="active-discovery-filters" aria-label="Active discovery filters">
+                {ownerFilter ? <Link to={publisherRoute(ownerFilter)}>@{ownerFilter}</Link> : null}
+                {tagFilter ? <Link to={tagRoute(tagFilter)}>#{tagFilter}</Link> : null}
+                <button type="button" onClick={clearDiscoveryFilters}>
+                  Clear
+                </button>
+              </div>
+            ) : null}
             <div className="results-list">
               {loading ? <p className="muted">Loading registry...</p> : null}
               {error ? <p className="form-error">{error}</p> : null}
@@ -1808,6 +1991,16 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
                 <PackageRow key={item.name} item={item} active={item.name === activeName} />
               ))}
             </div>
+            {nextCursor && !loading ? (
+              <button
+                className="load-more-button"
+                type="button"
+                disabled={loadingMore}
+                onClick={() => void loadPackages(nextCursor)}
+              >
+                {loadingMore ? "Loading..." : "Load more"}
+              </button>
+            ) : null}
           </aside>
 
           {publishMode ? (
@@ -1838,7 +2031,9 @@ export default function App() {
       <Route path="/" element={<HomeLanding theme={theme} />} />
       <Route path="/skills" element={<DirectoryPage kind="skills" theme={theme} />} />
       <Route path="/plugins" element={<DirectoryPage kind="plugins" theme={theme} />} />
+      <Route path="/publishers/:handle" element={<PublisherDetailPage theme={theme} />} />
       <Route path="/publishers" element={<PublishersPage theme={theme} />} />
+      <Route path="/tags/:tag" element={<TagPage theme={theme} />} />
       <Route path="/docs" element={<DocsPage theme={theme} />} />
       <Route path="/marketplace" element={<Marketplace />} />
       <Route path="/packages/*" element={<Marketplace />} />

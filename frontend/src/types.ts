@@ -48,6 +48,7 @@ export type PackageListItem = {
   isOfficial: boolean;
   summary?: string | null;
   ownerHandle?: string | null;
+  topics?: string[];
   createdAt: number;
   updatedAt: number;
   latestVersion?: string | null;

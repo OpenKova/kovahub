@@ -46,11 +46,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchPackages(params: { q?: string; family?: PackageFamily } = {}) {
+export type FetchPackagesParams = {
+  q?: string;
+  family?: PackageFamily;
+  owner?: string;
+  tag?: string;
+  cursor?: string | null;
+  limit?: number;
+};
+
+export async function fetchPackages(params: FetchPackagesParams = {}) {
   const query = new URLSearchParams();
   if (params.q) query.set("q", params.q);
   if (params.family) query.set("family", params.family);
-  query.set("limit", "100");
+  if (params.owner) query.set("owner", params.owner);
+  if (params.tag) query.set("tag", params.tag);
+  if (params.cursor) query.set("cursor", params.cursor);
+  query.set("limit", String(params.limit ?? 100));
   return request<{ items: PackageListItem[]; nextCursor: string | null }>(
     `/api/v1/packages?${query.toString()}`,
   );
