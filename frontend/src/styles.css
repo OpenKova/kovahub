@@ -457,24 +457,6 @@ code {
   background: #fff;
 }
 
-.auth-divider {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 10px;
-  align-items: center;
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.auth-divider::before,
-.auth-divider::after {
-  height: 1px;
-  background: var(--line);
-  content: "";
-}
-
 .pill {
   gap: 6px;
   min-height: 28px;
@@ -588,10 +570,6 @@ code {
 
 .auth-card {
   max-width: 520px;
-}
-
-.auth-fallback-toggle {
-  justify-self: center;
 }
 
 .auth-callback-shell {

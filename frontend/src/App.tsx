@@ -29,11 +29,9 @@ import {
   getApiBase,
   getStoredToken,
   githubLoginUrl,
-  login,
   packageDownloadUrl,
   publishArchivePackage,
   publishPackage,
-  register,
   revokeApiToken,
   listApiTokens,
   storeToken,
@@ -303,32 +301,11 @@ function InfoCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
-  const [showPasswordAuth, setShowPasswordAuth] = useState(false);
-  const [mode, setMode] = useState<"register" | "login">("login");
-  const [handle, setHandle] = useState("builder");
-  const [email, setEmail] = useState("builder@example.com");
-  const [password, setPassword] = useState("correct-horse");
-  const [error, setError] = useState<string | null>(null);
+function AuthPanel() {
   const returnTo = `${window.location.pathname}${window.location.search}`;
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError(null);
-    try {
-      const result =
-        mode === "register"
-          ? await register({ handle, email, password })
-          : await login({ email, password });
-      storeToken(result.token);
-      onAuth(result.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed.");
-    }
-  }
-
   return (
-    <form className="auth-card" onSubmit={submit}>
+    <section className="auth-card">
       <div className="section-title">
         <Github size={17} aria-hidden="true" />
         <h2>Sign in to KovaHub</h2>
@@ -337,66 +314,7 @@ function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
         <Github size={16} aria-hidden="true" />
         Continue with GitHub
       </a>
-      {showPasswordAuth ? (
-        <>
-          <div className="auth-divider">
-            <span>email</span>
-          </div>
-          <div className="mode-tabs" aria-label="Account authentication mode">
-            <button
-              className={mode === "login" ? "is-active" : ""}
-              type="button"
-              onClick={() => {
-                setMode("login");
-                setError(null);
-              }}
-            >
-              Sign in
-            </button>
-            <button
-              className={mode === "register" ? "is-active" : ""}
-              type="button"
-              onClick={() => {
-                setMode("register");
-                setError(null);
-              }}
-            >
-              Create account
-            </button>
-          </div>
-          {mode === "register" ? (
-            <label>
-              Handle
-              <input value={handle} onChange={(event) => setHandle(event.target.value)} />
-            </label>
-          ) : null}
-          <label>
-            Email
-            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" />
-          </label>
-          <label>
-            Password
-            <input
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-            />
-          </label>
-          {error ? <p className="form-error">{error}</p> : null}
-          <button className="primary-action full" type="submit">
-            {mode === "register" ? "Create account" : "Sign in"}
-          </button>
-        </>
-      ) : (
-        <button
-          className="link-button auth-fallback-toggle"
-          type="button"
-          onClick={() => setShowPasswordAuth(true)}
-        >
-          Use email instead
-        </button>
-      )}
-    </form>
+    </section>
   );
 }
 
@@ -558,11 +476,9 @@ function ApiTokenPanel({ user }: { user: AuthUser | null }) {
 
 function PublishPanel({
   user,
-  onAuth,
   onPublished,
 }: {
   user: AuthUser | null;
-  onAuth: (user: AuthUser) => void;
   onPublished: (name: string) => void;
 }) {
   const [publishMethod, setPublishMethod] = useState<"compose" | "archive">("compose");
@@ -658,7 +574,7 @@ function PublishPanel({
     }
   }
 
-  if (!user) return <AuthPanel onAuth={onAuth} />;
+  if (!user) return <AuthPanel />;
 
   return (
     <form className="publish-panel" onSubmit={submit}>
@@ -969,7 +885,6 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
             <div className="publish-stack">
               <PublishPanel
                 user={user}
-                onAuth={setUser}
                 onPublished={(name) => {
                   void loadPackages();
                   navigate(packageRoute(name));
