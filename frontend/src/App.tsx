@@ -3,6 +3,7 @@ import {
   Boxes,
   CheckCircle2,
   Code2,
+  FileArchive,
   KeyRound,
   Package,
   Plug,
@@ -23,12 +24,20 @@ import {
   getStoredToken,
   login,
   packageDownloadUrl,
+  publishArchivePackage,
   publishPackage,
   register,
   storeToken,
 } from "./api";
 import { kovaRoboLogo } from "./brandAssets";
-import type { AuthUser, PackageDetail, PackageFamily, PackageListItem, PublishPayload } from "./types";
+import type {
+  AuthUser,
+  PackageDetail,
+  PackageFamily,
+  PackageListItem,
+  PublishArchiveMetadata,
+  PublishPayload,
+} from "./types";
 
 const familyLabels: Record<PackageFamily, string> = {
   skill: "Skill",
@@ -41,6 +50,18 @@ const familyIcons: Record<PackageFamily, typeof Sparkles> = {
   "code-plugin": Code2,
   "bundle-plugin": Boxes,
 };
+
+function optionalText(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseTags(value: string) {
+  return value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
 
 function formatDate(value: number) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(
@@ -296,6 +317,7 @@ function PublishPanel({
   onAuth: (user: AuthUser) => void;
   onPublished: (name: string) => void;
 }) {
+  const [publishMethod, setPublishMethod] = useState<"compose" | "archive">("compose");
   const [family, setFamily] = useState<PackageFamily>("code-plugin");
   const [name, setName] = useState("@builder/demo-plugin");
   const [displayName, setDisplayName] = useState("Demo Plugin");
@@ -304,6 +326,15 @@ function PublishPanel({
   const [pluginApi, setPluginApi] = useState("^1.0.0");
   const [minGatewayVersion, setMinGatewayVersion] = useState("2026.3.0");
   const [readme, setReadme] = useState("# Demo Plugin\n\nDescribe the package here.\n");
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [archiveFamily, setArchiveFamily] = useState<PackageFamily | "auto">("auto");
+  const [archiveName, setArchiveName] = useState("");
+  const [archiveDisplayName, setArchiveDisplayName] = useState("");
+  const [archiveVersion, setArchiveVersion] = useState("");
+  const [archiveSummary, setArchiveSummary] = useState("");
+  const [archiveTags, setArchiveTags] = useState("kova, archive");
+  const [archivePluginApi, setArchivePluginApi] = useState("");
+  const [archiveMinGatewayVersion, setArchiveMinGatewayVersion] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -311,6 +342,21 @@ function PublishPanel({
     event.preventDefault();
     setStatus(null);
     setError(null);
+    try {
+      const detail =
+        publishMethod === "archive"
+          ? await publishArchive()
+          : await publishComposedPackage();
+      const publishedName = detail.package?.name ?? name;
+      const publishedVersion = detail.package?.latestVersion ?? version;
+      setStatus(`Published ${publishedName}@${publishedVersion}`);
+      onPublished(publishedName);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Publish failed.");
+    }
+  }
+
+  async function publishComposedPackage() {
     const payload: PublishPayload = {
       name,
       displayName,
@@ -332,14 +378,28 @@ function PublishPanel({
         },
       ],
     };
-    try {
-      const detail = await publishPackage(payload);
-      const publishedName = detail.package?.name ?? name;
-      setStatus(`Published ${publishedName}@${version}`);
-      onPublished(publishedName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Publish failed.");
-    }
+    return publishPackage(payload);
+  }
+
+  async function publishArchive() {
+    if (!archiveFile) throw new Error("Choose a ZIP archive to publish.");
+    const compatibility =
+      optionalText(archivePluginApi) || optionalText(archiveMinGatewayVersion)
+        ? {
+            pluginApi: optionalText(archivePluginApi),
+            minGatewayVersion: optionalText(archiveMinGatewayVersion),
+          }
+        : undefined;
+    const metadata: PublishArchiveMetadata = {
+      name: optionalText(archiveName),
+      displayName: optionalText(archiveDisplayName),
+      family: archiveFamily === "auto" ? undefined : archiveFamily,
+      version: optionalText(archiveVersion),
+      summary: optionalText(archiveSummary),
+      tags: parseTags(archiveTags),
+      compatibility,
+    };
+    return publishArchivePackage(archiveFile, metadata);
   }
 
   if (!user) return <AuthPanel onAuth={onAuth} />;
@@ -350,56 +410,181 @@ function PublishPanel({
         <UploadCloud size={17} aria-hidden="true" />
         <h2>Publish Package</h2>
       </div>
-      <div className="form-grid">
-        <label>
-          Package name
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label>
-          Display name
-          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-        </label>
-        <label>
-          Family
-          <select value={family} onChange={(event) => setFamily(event.target.value as PackageFamily)}>
-            <option value="code-plugin">Code plugin</option>
-            <option value="bundle-plugin">Bundle plugin</option>
-            <option value="skill">Skill</option>
-          </select>
-        </label>
-        <label>
-          Version
-          <input value={version} onChange={(event) => setVersion(event.target.value)} />
-        </label>
+      <div className="mode-tabs" aria-label="Publish method">
+        <button
+          className={publishMethod === "compose" ? "is-active" : ""}
+          type="button"
+          onClick={() => {
+            setPublishMethod("compose");
+            setStatus(null);
+            setError(null);
+          }}
+        >
+          <Code2 size={15} aria-hidden="true" />
+          Compose
+        </button>
+        <button
+          className={publishMethod === "archive" ? "is-active" : ""}
+          type="button"
+          onClick={() => {
+            setPublishMethod("archive");
+            setStatus(null);
+            setError(null);
+          }}
+        >
+          <FileArchive size={15} aria-hidden="true" />
+          Archive ZIP
+        </button>
       </div>
-      <label>
-        Summary
-        <input value={summary} onChange={(event) => setSummary(event.target.value)} />
-      </label>
-      {family !== "skill" ? (
-        <div className="form-grid">
+
+      {publishMethod === "compose" ? (
+        <>
+          <div className="form-grid">
+            <label>
+              Package name
+              <input value={name} onChange={(event) => setName(event.target.value)} />
+            </label>
+            <label>
+              Display name
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            </label>
+            <label>
+              Family
+              <select value={family} onChange={(event) => setFamily(event.target.value as PackageFamily)}>
+                <option value="code-plugin">Code plugin</option>
+                <option value="bundle-plugin">Bundle plugin</option>
+                <option value="skill">Skill</option>
+              </select>
+            </label>
+            <label>
+              Version
+              <input value={version} onChange={(event) => setVersion(event.target.value)} />
+            </label>
+          </div>
+          <label>
+            Summary
+            <input value={summary} onChange={(event) => setSummary(event.target.value)} />
+          </label>
+          {family !== "skill" ? (
+            <div className="form-grid">
+              <label>
+                pluginApi
+                <input value={pluginApi} onChange={(event) => setPluginApi(event.target.value)} />
+              </label>
+              <label>
+                minGatewayVersion
+                <input
+                  value={minGatewayVersion}
+                  onChange={(event) => setMinGatewayVersion(event.target.value)}
+                />
+              </label>
+            </div>
+          ) : null}
+          <label>
+            Package content
+            <textarea value={readme} onChange={(event) => setReadme(event.target.value)} rows={7} />
+          </label>
+        </>
+      ) : (
+        <>
+          <label className="file-field">
+            Kova package ZIP
+            <input
+              accept=".zip,application/zip"
+              type="file"
+              onChange={(event) => {
+                setArchiveFile(event.target.files?.[0] ?? null);
+                setStatus(null);
+                setError(null);
+              }}
+            />
+          </label>
+          {archiveFile ? (
+            <div className="archive-file-summary">
+              <FileArchive size={17} aria-hidden="true" />
+              <span>{archiveFile.name}</span>
+              <strong>{(archiveFile.size / 1024).toFixed(1)} KB</strong>
+            </div>
+          ) : null}
+          <div className="form-grid">
+            <label>
+              Display name override
+              <input
+                placeholder="Inferred from archive"
+                value={archiveDisplayName}
+                onChange={(event) => setArchiveDisplayName(event.target.value)}
+              />
+            </label>
+            <label>
+              Family override
+              <select
+                value={archiveFamily}
+                onChange={(event) => setArchiveFamily(event.target.value as PackageFamily | "auto")}
+              >
+                <option value="auto">Auto</option>
+                <option value="code-plugin">Code plugin</option>
+                <option value="bundle-plugin">Bundle plugin</option>
+                <option value="skill">Skill</option>
+              </select>
+            </label>
+            <label>
+              Package name override
+              <input
+                placeholder="Inferred from package.json"
+                value={archiveName}
+                onChange={(event) => setArchiveName(event.target.value)}
+              />
+            </label>
+            <label>
+              Version override
+              <input
+                placeholder="Inferred from package.json"
+                value={archiveVersion}
+                onChange={(event) => setArchiveVersion(event.target.value)}
+              />
+            </label>
+          </div>
+          <label>
+            Summary override
+            <input
+              placeholder="Inferred from package metadata"
+              value={archiveSummary}
+              onChange={(event) => setArchiveSummary(event.target.value)}
+            />
+          </label>
+          <label>
+            Tags
+            <input value={archiveTags} onChange={(event) => setArchiveTags(event.target.value)} />
+          </label>
+          <div className="form-grid">
           <label>
             pluginApi
-            <input value={pluginApi} onChange={(event) => setPluginApi(event.target.value)} />
+            <input
+              placeholder="Inferred from kova.compat"
+              value={archivePluginApi}
+              onChange={(event) => setArchivePluginApi(event.target.value)}
+            />
           </label>
           <label>
             minGatewayVersion
             <input
-              value={minGatewayVersion}
-              onChange={(event) => setMinGatewayVersion(event.target.value)}
+              placeholder="Inferred from kova.compat"
+              value={archiveMinGatewayVersion}
+              onChange={(event) => setArchiveMinGatewayVersion(event.target.value)}
             />
           </label>
         </div>
-      ) : null}
-      <label>
-        Package content
-        <textarea value={readme} onChange={(event) => setReadme(event.target.value)} rows={7} />
-      </label>
+        </>
+      )}
       {status ? <p className="form-success">{status}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
       <button className="primary-action full" type="submit">
-        <UploadCloud size={16} aria-hidden="true" />
-        Publish latest
+        {publishMethod === "archive" ? (
+          <FileArchive size={16} aria-hidden="true" />
+        ) : (
+          <UploadCloud size={16} aria-hidden="true" />
+        )}
+        {publishMethod === "archive" ? "Publish archive" : "Publish latest"}
       </button>
     </form>
   );

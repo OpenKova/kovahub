@@ -81,3 +81,16 @@ export type PublishPayload = {
     contentType?: string;
   }>;
 };
+
+export type PublishArchiveMetadata = {
+  name?: string;
+  displayName?: string;
+  family?: PackageFamily;
+  version?: string;
+  summary?: string;
+  tags?: string[];
+  compatibility?: {
+    pluginApi?: string;
+    minGatewayVersion?: string;
+  };
+};

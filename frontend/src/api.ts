@@ -1,4 +1,11 @@
-import type { AuthUser, PackageDetail, PackageFamily, PackageListItem, PublishPayload } from "./types";
+import type {
+  AuthUser,
+  PackageDetail,
+  PackageFamily,
+  PackageListItem,
+  PublishArchiveMetadata,
+  PublishPayload,
+} from "./types";
 
 const apiBase = (import.meta.env.VITE_KOVAHUB_API_URL || "http://localhost:8787").replace(/\/+$/, "");
 const tokenKey = "kovahub.authToken";
@@ -21,7 +28,8 @@ export function clearToken() {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (!headers.has("content-type") && init.body) headers.set("content-type", "application/json");
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (!headers.has("content-type") && init.body && !isFormData) headers.set("content-type", "application/json");
   const token = getStoredToken();
   if (token) headers.set("authorization", `Bearer ${token}`);
   const response = await fetch(`${apiBase}${path}`, {
@@ -54,6 +62,26 @@ export async function publishPackage(payload: PublishPayload) {
   return request<PackageDetail>("/api/v1/packages", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+function compactMetadata(metadata: PublishArchiveMetadata) {
+  const entries = Object.entries(metadata).filter(([, value]) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === "object") return Object.values(value).some(Boolean);
+    return Boolean(value);
+  });
+  return Object.fromEntries(entries) as PublishArchiveMetadata;
+}
+
+export async function publishArchivePackage(file: File, metadata: PublishArchiveMetadata) {
+  const form = new FormData();
+  form.append("archive", file);
+  const compacted = compactMetadata(metadata);
+  if (Object.keys(compacted).length > 0) form.append("metadata", JSON.stringify(compacted));
+  return request<PackageDetail>("/api/v1/packages", {
+    method: "POST",
+    body: form,
   });
 }
 
