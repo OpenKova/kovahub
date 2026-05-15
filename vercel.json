@@ -1,0 +1,30 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm build",
+  "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/vercel.ts": {
+      "includeFiles": "database/migrations/*.sql",
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/v1/:path*",
+      "destination": "/api/vercel?__kovahub_path=/api/v1/:path*"
+    },
+    {
+      "source": "/openapi.json",
+      "destination": "/api/vercel?__kovahub_path=/openapi.json"
+    },
+    {
+      "source": "/healthz",
+      "destination": "/api/vercel?__kovahub_path=/healthz"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
+  ]
+}

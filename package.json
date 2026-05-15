@@ -10,7 +10,7 @@
     "dev:backend": "pnpm --filter @kovahub/backend dev",
     "dev:frontend": "pnpm --filter @kovahub/frontend dev",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.vercel.json --noEmit"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
