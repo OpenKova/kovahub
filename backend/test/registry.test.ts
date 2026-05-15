@@ -31,7 +31,7 @@ async function createApiToken(app: Awaited<ReturnType<typeof buildServer>>, jwt:
   expect(body.token).toMatch(/^khp_/);
   expect(body.apiToken.name).toBe("local cli");
   expect(body.apiToken.lastUsedAt).toBeNull();
-  return body.token;
+  return body;
 }
 
 function sha256Hex(bytes: Buffer) {
@@ -173,7 +173,7 @@ describe("registry api", () => {
   it("creates API tokens and accepts them for package publishing", async () => {
     const app = await buildServer();
     const jwt = await registerAndLogin(app);
-    const apiToken = await createApiToken(app, jwt);
+    const { token: apiToken } = await createApiToken(app, jwt);
 
     const publish = await app.inject({
       method: "POST",
@@ -200,6 +200,39 @@ describe("registry api", () => {
     });
     expect(tokens.statusCode).toBe(200);
     expect(tokens.json().tokens[0].lastUsedAt).toEqual(expect.any(Number));
+    await app.close();
+  });
+
+  it("allows browser clients to revoke API tokens", async () => {
+    const app = await buildServer();
+    const jwt = await registerAndLogin(app);
+    const { apiToken } = await createApiToken(app, jwt);
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: `/api/v1/auth/tokens/${apiToken.id}`,
+      headers: {
+        origin: "http://localhost:5173",
+        "access-control-request-method": "DELETE",
+      },
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-methods"]).toContain("DELETE");
+
+    const revoke = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/auth/tokens/${apiToken.id}`,
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(revoke.statusCode).toBe(204);
+
+    const tokens = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/tokens",
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(tokens.statusCode).toBe(200);
+    expect(tokens.json().tokens).toEqual([]);
     await app.close();
   });
 

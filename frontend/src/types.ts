@@ -65,6 +65,13 @@ export type AuthUser = {
   email: string;
 };
 
+export type ApiTokenSummary = {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+};
+
 export type PublishPayload = {
   name: string;
   displayName?: string;

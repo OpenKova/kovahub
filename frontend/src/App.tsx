@@ -3,13 +3,16 @@ import {
   Boxes,
   CheckCircle2,
   Code2,
+  Copy,
   FileArchive,
   KeyRound,
   Package,
   Plug,
+  RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UploadCloud,
   UserRound,
 } from "lucide-react";
@@ -17,6 +20,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   clearToken,
+  createApiToken,
   fetchMe,
   fetchPackageDetail,
   fetchPackages,
@@ -27,11 +31,14 @@ import {
   publishArchivePackage,
   publishPackage,
   register,
+  revokeApiToken,
+  listApiTokens,
   storeToken,
 } from "./api";
 import { kovaRoboLogo } from "./brandAssets";
 import type {
   AuthUser,
+  ApiTokenSummary,
   PackageDetail,
   PackageFamily,
   PackageListItem,
@@ -305,6 +312,123 @@ function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
         {mode === "register" ? "Use existing account" : "Create a new account"}
       </button>
     </form>
+  );
+}
+
+function ApiTokenPanel({ user }: { user: AuthUser | null }) {
+  const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
+  const [tokenName, setTokenName] = useState("local cli");
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadTokens = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await listApiTokens();
+      setTokens(result.tokens);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load API tokens.");
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadTokens();
+  }, [loadTokens]);
+
+  async function createToken(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setStatus(null);
+    try {
+      const result = await createApiToken(tokenName);
+      setCreatedToken(result.token);
+      setTokens((current) => [result.apiToken, ...current]);
+      setStatus("API token created.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create API token.");
+    }
+  }
+
+  async function copyCreatedToken() {
+    if (!createdToken) return;
+    try {
+      await navigator.clipboard.writeText(createdToken);
+      setStatus("API token copied.");
+    } catch {
+      setStatus("Copy unavailable in this browser.");
+    }
+  }
+
+  async function revokeToken(id: string) {
+    setError(null);
+    setStatus(null);
+    try {
+      await revokeApiToken(id);
+      setTokens((current) => current.filter((token) => token.id !== id));
+      setStatus("API token revoked.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke API token.");
+    }
+  }
+
+  if (!user) return null;
+
+  return (
+    <section className="token-panel">
+      <div className="section-title">
+        <KeyRound size={17} aria-hidden="true" />
+        <h2>Publish Tokens</h2>
+      </div>
+      <form className="token-create-row" onSubmit={createToken}>
+        <label>
+          Token name
+          <input value={tokenName} onChange={(event) => setTokenName(event.target.value)} />
+        </label>
+        <button className="primary-action" type="submit">
+          <KeyRound size={16} aria-hidden="true" />
+          Create token
+        </button>
+      </form>
+      {createdToken ? (
+        <div className="token-secret-box">
+          <span>{createdToken}</span>
+          <button type="button" onClick={copyCreatedToken} aria-label="Copy API token">
+            <Copy size={15} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+      <div className="token-list-heading">
+        <span>{loading ? "Loading tokens..." : `${tokens.length} active tokens`}</span>
+        <button type="button" onClick={() => void loadTokens()} aria-label="Refresh API tokens">
+          <RefreshCw size={15} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="token-list">
+        {tokens.length === 0 && !loading ? <p className="muted">No API tokens yet.</p> : null}
+        {tokens.map((token) => (
+          <div className="token-row" key={token.id}>
+            <div>
+              <strong>{token.name}</strong>
+              <span>
+                Created {formatDate(token.createdAt)}
+                {token.lastUsedAt ? ` · Used ${formatDate(token.lastUsedAt)}` : ""}
+              </span>
+            </div>
+            <button type="button" onClick={() => void revokeToken(token.id)} aria-label={`Revoke ${token.name}`}>
+              <Trash2 size={15} aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+      </div>
+      {status ? <p className="form-success">{status}</p> : null}
+      {error ? <p className="form-error">{error}</p> : null}
+    </section>
   );
 }
 
@@ -710,14 +834,17 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
           </aside>
 
           {publishMode ? (
-            <PublishPanel
-              user={user}
-              onAuth={setUser}
-              onPublished={(name) => {
-                void loadPackages();
-                navigate(packageRoute(name));
-              }}
-            />
+            <div className="publish-stack">
+              <PublishPanel
+                user={user}
+                onAuth={setUser}
+                onPublished={(name) => {
+                  void loadPackages();
+                  navigate(packageRoute(name));
+                }}
+              />
+              <ApiTokenPanel user={user} />
+            </div>
           ) : (
             <DetailPanel detail={detail} />
           )}

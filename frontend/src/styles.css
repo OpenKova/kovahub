@@ -221,6 +221,7 @@ code {
 .browse-panel,
 .detail-panel,
 .publish-panel,
+.token-panel,
 .auth-card {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -377,6 +378,7 @@ code {
 
 .detail-panel,
 .publish-panel,
+.token-panel,
 .auth-card {
   padding: 24px;
 }
@@ -531,9 +533,15 @@ code {
 }
 
 .publish-panel,
+.token-panel,
 .auth-card {
   display: grid;
   gap: 16px;
+}
+
+.publish-stack {
+  display: grid;
+  gap: 18px;
 }
 
 .auth-card {
@@ -628,6 +636,108 @@ label textarea {
   white-space: nowrap;
 }
 
+.token-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.token-secret-box,
+.token-list-heading,
+.token-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.token-secret-box,
+.token-list-heading,
+.token-row {
+  display: flex;
+  align-items: center;
+}
+
+.token-secret-box {
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.token-secret-box span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-secret-box button,
+.token-list-heading button,
+.token-row button {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-soft);
+}
+
+.token-secret-box button:hover,
+.token-list-heading button:hover,
+.token-row button:hover {
+  border-color: rgba(220, 38, 38, 0.55);
+  color: #fff;
+}
+
+.token-list-heading {
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.token-list {
+  display: grid;
+  gap: 8px;
+}
+
+.token-row {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+}
+
+.token-row div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.token-row strong,
+.token-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-row strong {
+  color: #fff;
+}
+
+.token-row span {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
 .form-error,
 .form-success,
 .muted {
@@ -689,7 +799,8 @@ label textarea {
 
   .stat-grid,
   .compat-grid,
-  .form-grid {
+  .form-grid,
+  .token-create-row {
     grid-template-columns: 1fr;
   }
 }

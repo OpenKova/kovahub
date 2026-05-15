@@ -1,5 +1,6 @@
 import type {
   AuthUser,
+  ApiTokenSummary,
   PackageDetail,
   PackageFamily,
   PackageListItem,
@@ -41,6 +42,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const body = (await response.json().catch(() => ({ error: fallback }))) as { error?: string };
     throw new Error(body.error ?? fallback);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -101,6 +103,23 @@ export async function login(input: { email: string; password: string }) {
 
 export async function fetchMe() {
   return request<{ user: AuthUser }>("/api/v1/auth/me");
+}
+
+export async function listApiTokens() {
+  return request<{ tokens: ApiTokenSummary[] }>("/api/v1/auth/tokens");
+}
+
+export async function createApiToken(name: string) {
+  return request<{ token: string; apiToken: ApiTokenSummary }>("/api/v1/auth/tokens", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function revokeApiToken(id: string) {
+  return request<void>(`/api/v1/auth/tokens/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export function packageDownloadUrl(name: string, version?: string | null) {
