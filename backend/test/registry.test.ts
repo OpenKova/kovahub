@@ -31,7 +31,7 @@ async function createApiToken(app: Awaited<ReturnType<typeof buildServer>>, jwt:
 }
 
 describe("registry api", () => {
-  it("serves ClawHub-compatible package search and detail responses", async () => {
+  it("serves KovaHub-compatible package search and detail responses", async () => {
     const app = await buildServer();
     const search = await app.inject("/api/v1/packages/search?q=context");
     expect(search.statusCode).toBe(200);

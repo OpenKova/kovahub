@@ -3,7 +3,7 @@ export type PackageChannel = "official" | "community" | "private";
 
 export type PackageCompatibility = {
   pluginApiRange?: string;
-  builtWithOpenClawVersion?: string;
+  builtWithKovaVersion?: string;
   pluginSdkVersion?: string;
   minGatewayVersion?: string;
 };

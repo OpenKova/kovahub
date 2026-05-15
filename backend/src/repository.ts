@@ -137,11 +137,16 @@ export function defaultFilesFor(input: PublishPackageInput) {
     name: input.name,
     version: input.version,
     family: input.family,
-    openclaw: {
+    kova: {
       compat: input.compatibility
         ? {
             pluginApi: input.compatibility.pluginApi ?? input.compatibility.pluginApiRange,
             minGatewayVersion: input.compatibility.minGatewayVersion,
+          }
+        : undefined,
+      build: input.compatibility?.builtWithKovaVersion
+        ? {
+            kovaVersion: input.compatibility.builtWithKovaVersion,
           }
         : undefined,
     },
@@ -450,14 +455,14 @@ export const seedPackageInputs: PublishPackageInput[] = [
     displayName: "Context Bridge",
     family: "code-plugin",
     version: "0.1.0",
-    summary: "Gateway-side context extension for Kova and OpenClaw agents.",
+    summary: "Gateway-side context extension for Kova agents.",
     changelog: "Initial public KovaHub seed.",
     channel: "official",
     tags: ["context", "gateway"],
     compatibility: {
       pluginApi: "^1.0.0",
       minGatewayVersion: "2026.3.0",
-      builtWithOpenClawVersion: "2026.3.0",
+      builtWithKovaVersion: "2026.3.0",
     },
     capabilities: {
       executesCode: true,
@@ -472,10 +477,13 @@ export const seedPackageInputs: PublishPackageInput[] = [
           {
             name: "@openkova/context-bridge",
             version: "0.1.0",
-            openclaw: {
+            kova: {
               compat: {
                 pluginApi: "^1.0.0",
                 minGatewayVersion: "2026.3.0",
+              },
+              build: {
+                kovaVersion: "2026.3.0",
               },
             },
           },

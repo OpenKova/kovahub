@@ -120,7 +120,7 @@ function PackageRow({ item, active }: { item: PackageListItem; active: boolean }
           ) : null}
         </span>
         <span className="package-row-summary">
-          {item.summary ?? "Kova/OpenClaw-compatible package."}
+          {item.summary ?? "Kova-compatible package."}
         </span>
         <span className="package-row-meta">
           <span>{familyLabels[item.family]}</span>
@@ -191,7 +191,7 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
           <InfoCell label="minGatewayVersion" value={compatibility?.minGatewayVersion ?? "Any"} />
           <InfoCell
             label="builtWith"
-            value={compatibility?.builtWithOpenClawVersion ?? "Not declared"}
+            value={compatibility?.builtWithKovaVersion ?? "Not declared"}
           />
           <InfoCell label="pluginSdk" value={compatibility?.pluginSdkVersion ?? "Not declared"} />
         </div>
@@ -300,7 +300,7 @@ function PublishPanel({
   const [name, setName] = useState("@builder/demo-plugin");
   const [displayName, setDisplayName] = useState("Demo Plugin");
   const [version, setVersion] = useState("0.1.0");
-  const [summary, setSummary] = useState("A Kova/OpenClaw-compatible package published from KovaHub.");
+  const [summary, setSummary] = useState("A Kova-compatible package published from KovaHub.");
   const [pluginApi, setPluginApi] = useState("^1.0.0");
   const [minGatewayVersion, setMinGatewayVersion] = useState("2026.3.0");
   const [readme, setReadme] = useState("# Demo Plugin\n\nDescribe the package here.\n");
@@ -479,11 +479,11 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
         <section className="workspace-head">
           <div>
             <h1>KovaHub Registry</h1>
-            <p>Fresh marketplace infrastructure for Kova/OpenClaw plugins, bundle plugins, and skills.</p>
+            <p>Fresh marketplace infrastructure for Kova plugins, bundle plugins, and skills.</p>
           </div>
           <div className="registry-target">
             <span>Registry target</span>
-            <code>CLAWHUB_REGISTRY={getApiBase()}</code>
+            <code>KOVAHUB_REGISTRY={getApiBase()}</code>
           </div>
         </section>
 

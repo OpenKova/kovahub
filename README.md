@@ -1,13 +1,13 @@
 # KovaHub
 
-KovaHub is a fresh Kova/OpenClaw-compatible marketplace for publishing and installing plugins, bundle plugins, and skills.
+KovaHub is a fresh Kova-compatible marketplace for publishing and installing plugins, bundle plugins, and skills.
 
-The MVP scaffold is intentionally small: a TypeScript backend exposes ClawHub-compatible registry routes, a React/Vite frontend provides the marketplace UI, and `database/` contains the Postgres schema used by the persistent backend mode.
+The MVP scaffold is intentionally small: a TypeScript backend exposes KovaHub registry routes, a React/Vite frontend provides the marketplace UI, and `database/` contains the Postgres schema used by the persistent backend mode.
 
 ## Stack
 
 - `backend/`: Fastify, Zod, JWT auth, in-memory development repository, optional Postgres persistence, local archive storage, ZIP archive generation.
-- `frontend/`: React, Vite, lucide icons, ClawHub-inspired dark marketplace UI.
+- `frontend/`: React, Vite, lucide icons, dark KovaHub marketplace UI.
 - `database/`: Postgres DDL for users, packages, versions, files, and API tokens.
 - Package manager: `pnpm`.
 
@@ -34,12 +34,11 @@ pnpm dev:backend
 
 Set `KOVAHUB_SEED_DATABASE=false` to skip the seed packages in a persistent database.
 
-For local Kova/OpenClaw testing:
+For local Kova testing:
 
 ```bash
-export CLAWHUB_SITE=http://localhost:5173
-export CLAWHUB_REGISTRY=http://localhost:8787
-export OPENCLAW_CLAWHUB_URL=http://localhost:8787
+export KOVAHUB_SITE=http://localhost:5173
+export KOVAHUB_REGISTRY=http://localhost:8787
 ```
 
 ## Checks
@@ -73,7 +72,7 @@ Implemented in the scaffold:
   - publish accepts `compatibility.pluginApi`
   - registry responses expose `compatibility.pluginApiRange`
   - registry responses expose `compatibility.minGatewayVersion`
-- Kova/OpenClaw-compatible registry target env docs.
+- Kova-compatible registry target env docs.
 
 Registry-compatible read routes:
 
@@ -115,16 +114,16 @@ curl -X POST http://localhost:8787/api/v1/packages \
 
 1. Add multipart archive publishing and server-side package inspection.
 2. Validate plugin package metadata from `package.json`:
-   - `openclaw.compat.pluginApi`
-   - `openclaw.compat.minGatewayVersion`
-   - `openclaw.build.openclawVersion`
+   - `kova.compat.pluginApi`
+   - `kova.compat.minGatewayVersion`
+   - `kova.build.kovaVersion`
 3. Add S3/R2-compatible archive storage for hosted deployments.
 4. Add moderation/security scan placeholders before packages become public.
 5. Add pagination, tags, owner pages, and version history to the frontend.
 
 ## References
 
-- Kova/OpenClaw reference repo: `/home/chirag/kova`
+- Kova reference repo: `/home/chirag/kova`
 - ClawHub reference repo inspected from `https://github.com/openclaw/clawhub.git`
 
-The Kova reference was used only for docs/contracts. ClawHub is MIT-licensed; this scaffold uses original code with a ClawHub-inspired visual direction.
+The Kova reference was used only for docs/contracts. ClawHub is MIT-licensed and was inspected only as a visual/product reference; this scaffold uses original KovaHub code and Kova package metadata.

@@ -8,7 +8,7 @@ export type PackageChannel = (typeof packageChannels)[number];
 
 export type PackageCompatibility = {
   pluginApiRange?: string;
-  builtWithOpenClawVersion?: string;
+  builtWithKovaVersion?: string;
   pluginSdkVersion?: string;
   minGatewayVersion?: string;
 };
@@ -113,7 +113,7 @@ export const compatibilityInputSchema = z
   .object({
     pluginApi: z.string().trim().min(1).optional(),
     pluginApiRange: z.string().trim().min(1).optional(),
-    builtWithOpenClawVersion: z.string().trim().min(1).optional(),
+    builtWithKovaVersion: z.string().trim().min(1).optional(),
     pluginSdkVersion: z.string().trim().min(1).optional(),
     minGatewayVersion: z.string().trim().min(1).optional(),
   })
@@ -159,7 +159,7 @@ export function normalizeCompatibility(
   const pluginApiRange = input.pluginApiRange ?? input.pluginApi;
   const compatibility: PackageCompatibility = {
     pluginApiRange,
-    builtWithOpenClawVersion: input.builtWithOpenClawVersion,
+    builtWithKovaVersion: input.builtWithKovaVersion,
     pluginSdkVersion: input.pluginSdkVersion,
     minGatewayVersion: input.minGatewayVersion,
   };
