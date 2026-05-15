@@ -7,7 +7,7 @@ The MVP scaffold is intentionally small: a TypeScript backend exposes KovaHub re
 ## Stack
 
 - `backend/`: Fastify, Zod, JWT auth, in-memory development repository, optional Postgres persistence, local archive storage, ZIP archive generation.
-- `frontend/`: React, Vite, lucide icons, dark KovaHub marketplace UI.
+- `frontend/`: React, Vite, lucide icons, ClawHub-inspired KovaHub marketplace UI.
 - `database/`: Postgres DDL for users, packages, versions, files, and API tokens.
 - Package manager: `pnpm`.
 
@@ -81,6 +81,7 @@ Implemented in the scaffold:
 - Optional Postgres persistence for users, packages, versions, files, and package stats.
 - Durable local archive storage for persistent mode.
 - Package list/search.
+- Package topics, owner filters, tag filters, cursor pagination, and dedicated publisher/topic pages.
 - Package detail page with compatibility, capability signals, stats, and version history.
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
@@ -95,12 +96,14 @@ Implemented in the scaffold:
 Registry-compatible read routes:
 
 - `GET /.well-known/kovahub.json`
-- `GET /api/v1/packages`
-- `GET /api/v1/packages/search?q=...`
+- `GET /api/v1/packages?q=...&family=...&owner=...&tag=...&cursor=...&limit=...`
+- `GET /api/v1/packages/search?q=...&family=...&owner=...&tag=...`
 - `GET /api/v1/packages/:name`
 - `GET /api/v1/packages/:name/versions`
 - `GET /api/v1/packages/:name/versions/:version`
 - `GET /api/v1/packages/:name/download?version=...`
+- `GET /api/v1/publishers/:handle/packages`
+- `GET /api/v1/tags/:tag/packages`
 - `GET /api/v1/plugins`
 - `GET /api/v1/plugins/search?q=...`
 - `GET /api/v1/code-plugins`
@@ -159,7 +162,7 @@ Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MA
 
 1. Add S3/R2-compatible archive storage for hosted deployments.
 2. Add moderation/security scan placeholders before packages become public.
-3. Add pagination, tag pages, owner pages, and richer package discovery.
+3. Add ranking, install metrics, saved/starred packages, and richer discovery signals.
 4. Add compatibility smoke tests against the local Kova reference contracts.
 
 ## References
