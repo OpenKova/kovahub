@@ -235,6 +235,15 @@ function topicsFor(item: Pick<PackageListItem, "topics">) {
   return item.topics?.filter(Boolean) ?? [];
 }
 
+function formatStatus(value?: string | null) {
+  return value ? value.replace(/-/g, " ") : "unknown";
+}
+
+function reviewLabel(item: Pick<PackageListItem, "moderationStatus">) {
+  if (!item.moderationStatus || item.moderationStatus === "approved") return null;
+  return item.moderationStatus === "pending" ? "Pending review" : "Review rejected";
+}
+
 const fallbackSkillCards: HomeCardItem[] = [
   {
     name: "release-notes-sherpa",
@@ -484,6 +493,7 @@ function FamilyPill({ family }: { family: PackageFamily }) {
 
 function PackageRow({ item, active }: { item: PackageListItem; active: boolean }) {
   const Icon = familyIcons[item.family];
+  const review = reviewLabel(item);
   return (
     <Link className={`package-row${active ? " is-active" : ""}`} to={packageRoute(item.name)}>
       <span className="package-icon">
@@ -506,6 +516,7 @@ function PackageRow({ item, active }: { item: PackageListItem; active: boolean }
         <span className="package-row-meta">
           <span>{familyLabels[item.family]}</span>
           {item.latestVersion ? <span>v{item.latestVersion}</span> : null}
+          {review ? <span>{review}</span> : null}
           <span>{formatDate(item.updatedAt)}</span>
         </span>
       </span>
@@ -527,6 +538,7 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
 
   const compatibility = pkg.compatibility;
   const capabilities = pkg.capabilities;
+  const verification = pkg.verification;
   const tags = Object.entries(pkg.tags ?? {});
   const topics = topicsFor(pkg);
   const versions = pkg.versions ?? [];
@@ -622,6 +634,19 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
             value={compatibility?.builtWithKovaVersion ?? "Not declared"}
           />
           <InfoCell label="pluginSdk" value={compatibility?.pluginSdkVersion ?? "Not declared"} />
+        </div>
+      </div>
+
+      <div className="info-section">
+        <h2>
+          <ShieldCheck size={17} aria-hidden="true" />
+          Review Status
+        </h2>
+        <div className="compat-grid">
+          <InfoCell label="moderation" value={formatStatus(verification?.moderationStatus)} />
+          <InfoCell label="securityScan" value={formatStatus(verification?.scanStatus)} />
+          <InfoCell label="tier" value={formatStatus(verification?.tier)} />
+          <InfoCell label="risk" value={formatStatus(verification?.riskLevel)} />
         </div>
       </div>
 
@@ -1514,6 +1539,7 @@ function LandingPageShell({ theme, children }: { theme: ThemeSettings; children:
 function DirectoryPackageCard({ item }: { item: PackageListItem }) {
   const Icon = familyIcons[item.family];
   const topics = topicsFor(item).slice(0, 2);
+  const review = reviewLabel(item);
 
   return (
     <Link to={packageRoute(item.name)} className="directory-card">
@@ -1533,6 +1559,7 @@ function DirectoryPackageCard({ item }: { item: PackageListItem }) {
         {topics.map((topic) => (
           <span key={topic}>#{topic}</span>
         ))}
+        {review ? <span>{review}</span> : null}
         <span>{formatDate(item.updatedAt)}</span>
       </div>
     </Link>

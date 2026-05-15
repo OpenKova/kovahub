@@ -41,6 +41,8 @@ export type PackageVerificationSummary = {
   sourceCommit?: string;
   hasProvenance?: boolean;
   scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
+  moderationStatus?: "pending" | "approved" | "rejected";
+  riskLevel?: "unknown" | "low" | "medium" | "high";
 };
 
 export type PackageFile = {
@@ -66,6 +68,8 @@ export type PackageListItem = {
   capabilityTags?: string[];
   executesCode?: boolean;
   verificationTier?: string | null;
+  scanStatus?: PackageVerificationSummary["scanStatus"] | null;
+  moderationStatus?: PackageVerificationSummary["moderationStatus"] | null;
 };
 
 export type PackageVersionRecord = {
@@ -201,5 +205,7 @@ export function toPackageListItem(record: PackageRecord): PackageListItem {
     capabilityTags: record.capabilityTags,
     executesCode: record.executesCode,
     verificationTier: record.verificationTier,
+    scanStatus: record.verification?.scanStatus ?? null,
+    moderationStatus: record.verification?.moderationStatus ?? null,
   };
 }

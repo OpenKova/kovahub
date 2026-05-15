@@ -255,6 +255,10 @@ describe("registry api", () => {
     expect(detail.statusCode).toBe(200);
     expect(detail.json().package.compatibility.pluginApiRange).toBe("^1.0.0");
     expect(detail.json().package.topics).toEqual(["context", "gateway"]);
+    expect(detail.json().package.verification).toMatchObject({
+      scanStatus: "pending",
+      moderationStatus: "approved",
+    });
 
     const topicList = await app.inject("/api/v1/packages?tag=context");
     expect(topicList.statusCode).toBe(200);
@@ -363,10 +367,23 @@ describe("registry api", () => {
     expect(publish.statusCode).toBe(201);
     expect(publish.json().package.latestVersion).toBe("0.1.0");
     expect(publish.json().package.topics).toEqual(["demo", "gateway"]);
+    expect(publish.json().package).toMatchObject({
+      scanStatus: "pending",
+      moderationStatus: "pending",
+      verification: {
+        scanStatus: "pending",
+        moderationStatus: "pending",
+        riskLevel: "unknown",
+      },
+    });
 
     const version = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/versions/0.1.0");
     expect(version.statusCode).toBe(200);
     expect(version.json().version.distTags).toContain("latest");
+    expect(version.json().version.verification).toMatchObject({
+      scanStatus: "pending",
+      moderationStatus: "pending",
+    });
 
     const download = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/download?tag=latest");
     expect(download.statusCode).toBe(200);
@@ -693,6 +710,11 @@ describe("registry api", () => {
       "source:archive",
       "compat:gateway-min",
     ]);
+    expect(publish.json().package.verification).toMatchObject({
+      scanStatus: "pending",
+      moderationStatus: "pending",
+      riskLevel: "unknown",
+    });
 
     const version = await app.inject("/api/v1/packages/%40tester%2Farchive-plugin/versions/0.2.0");
     expect(version.statusCode).toBe(200);

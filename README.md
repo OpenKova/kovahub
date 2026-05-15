@@ -99,6 +99,7 @@ Implemented in the scaffold:
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
 - ZIP archive download endpoints.
+- Non-blocking moderation and security scan status placeholders in package verification metadata.
 - Frontend compose publishing, archive ZIP publishing, and API token management.
 - Plugin compatibility metadata:
   - publish accepts `compatibility.pluginApi`
@@ -173,9 +174,8 @@ Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MA
 
 ## Remaining Hardening
 
-1. Add moderation/security scan placeholders before packages become public.
-2. Add ranking, install metrics, saved/starred packages, and richer discovery signals.
-3. Add compatibility smoke tests against the local Kova reference contracts.
+1. Add ranking, install metrics, saved/starred packages, and richer discovery signals.
+2. Add compatibility smoke tests against the local Kova reference contracts.
 
 ## References
 

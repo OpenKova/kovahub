@@ -21,6 +21,18 @@ export type PackageCapabilities = {
   hostTargets?: string[];
 };
 
+export type PackageVerification = {
+  tier: "structural" | "source-linked" | "provenance-verified" | "rebuild-verified";
+  scope: "artifact-only" | "dependency-graph-aware";
+  summary?: string;
+  sourceRepo?: string;
+  sourceCommit?: string;
+  hasProvenance?: boolean;
+  scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
+  moderationStatus?: "pending" | "approved" | "rejected";
+  riskLevel?: "unknown" | "low" | "medium" | "high";
+};
+
 export type PackageFile = {
   path: string;
   size: number;
@@ -37,6 +49,7 @@ export type PackageVersionSummary = {
   sha256hash: string;
   compatibility?: PackageCompatibility | null;
   capabilities?: PackageCapabilities | null;
+  verification?: PackageVerification | null;
 };
 
 export type PackageListItem = {
@@ -55,6 +68,8 @@ export type PackageListItem = {
   capabilityTags?: string[];
   executesCode?: boolean;
   verificationTier?: string | null;
+  scanStatus?: PackageVerification["scanStatus"] | null;
+  moderationStatus?: PackageVerification["moderationStatus"] | null;
 };
 
 export type PackageDetail = {
@@ -63,6 +78,7 @@ export type PackageDetail = {
         tags?: Record<string, string>;
         compatibility?: PackageCompatibility | null;
         capabilities?: PackageCapabilities | null;
+        verification?: PackageVerification | null;
         versions?: PackageVersionSummary[];
         stats?: {
           downloads: number;

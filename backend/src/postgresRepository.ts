@@ -191,6 +191,8 @@ function rowToPackage(row: PackageRow, versions: PackageVersionRecord[] = []): P
     capabilityTags: capabilities?.capabilityTags,
     executesCode: capabilities?.executesCode,
     verificationTier: row.verification?.tier ?? null,
+    scanStatus: row.verification?.scanStatus ?? null,
+    moderationStatus: row.verification?.moderationStatus ?? null,
     tags: row.latest_version ? { latest: row.latest_version } : {},
     compatibility: row.compatibility,
     capabilities,

@@ -10,6 +10,7 @@ import {
   type PackageFile,
   type PackageListItem,
   type PackageRecord,
+  type PackageVerificationSummary,
   type PackageVersionRecord,
   type PreparedPublishPackageInput,
   type PublishPackageInput,
@@ -241,6 +242,24 @@ export function normalizeCapabilities(
   };
 }
 
+export function createVerificationSummary(input: {
+  payload: PreparedPublishPackageInput;
+  capabilities: PackageCapabilitySummary | null;
+}): PackageVerificationSummary {
+  const moderationStatus = input.payload.channel === "official" ? "approved" : "pending";
+  return {
+    tier: "structural",
+    scope: "artifact-only",
+    summary:
+      moderationStatus === "approved"
+        ? "Structural validation passed; automated security scan is queued."
+        : "Structural validation passed; moderation and automated security scan are queued.",
+    scanStatus: "pending",
+    moderationStatus,
+    riskLevel: input.capabilities?.executesCode ? "unknown" : "low",
+  };
+}
+
 export function createPackageVersion(input: {
   payload: PreparedPublishPackageInput;
   compatibility: PackageCompatibility | null;
@@ -261,12 +280,7 @@ export function createPackageVersion(input: {
     sha256hash: sha256Hex(archive),
     compatibility: input.compatibility,
     capabilities: input.capabilities,
-    verification: {
-      tier: "structural",
-      scope: "artifact-only",
-      summary: "MVP structural validation only.",
-      scanStatus: "not-run",
-    },
+    verification: createVerificationSummary(input),
     archive,
   };
 }
