@@ -96,6 +96,7 @@ export type PackageRecord = PackageListItem & {
 
 const semverLike = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const packageNameLike = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+const skillSlugLike = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
 const safeRelativePath = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[A-Za-z0-9._@+/-]+$/;
 
 export const fileInputSchema = z
@@ -134,21 +135,31 @@ export const capabilityInputSchema = z
   })
   .optional();
 
-export const publishPackageSchema = z.object({
-  name: z.string().trim().min(1).max(214).regex(packageNameLike),
-  displayName: z.string().trim().min(1).max(120).optional(),
-  ownerHandle: z.string().trim().min(1).max(80).optional(),
-  family: z.enum(packageFamilies),
-  version: z.string().trim().regex(semverLike),
-  summary: z.string().trim().max(500).optional(),
-  changelog: z.string().default(""),
-  channel: z.enum(packageChannels).default("community"),
-  tags: z.array(z.string().trim().min(1).max(48)).default([]),
-  compatibility: compatibilityInputSchema,
-  capabilities: capabilityInputSchema,
-  archiveBase64: z.string().optional(),
-  files: z.array(fileInputSchema).default([]),
-});
+export const publishPackageSchema = z
+  .object({
+    name: z.string().trim().min(1).max(214).regex(packageNameLike),
+    displayName: z.string().trim().min(1).max(120).optional(),
+    ownerHandle: z.string().trim().min(1).max(80).optional(),
+    family: z.enum(packageFamilies),
+    version: z.string().trim().regex(semverLike),
+    summary: z.string().trim().max(500).optional(),
+    changelog: z.string().default(""),
+    channel: z.enum(packageChannels).default("community"),
+    tags: z.array(z.string().trim().min(1).max(48)).default([]),
+    compatibility: compatibilityInputSchema,
+    capabilities: capabilityInputSchema,
+    archiveBase64: z.string().optional(),
+    files: z.array(fileInputSchema).default([]),
+  })
+  .superRefine((value, ctx) => {
+    if (value.family === "skill" && !skillSlugLike.test(value.name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["name"],
+        message: "Skill packages require a Kova skill slug like release-notes-sherpa.",
+      });
+    }
+  });
 
 export type PublishPackageInput = z.infer<typeof publishPackageSchema>;
 

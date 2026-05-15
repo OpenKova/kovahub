@@ -112,6 +112,17 @@ function publicSkillDetail(pkg: PackageRecord) {
   };
 }
 
+function publicSkillListItem(pkg: PackageRecord) {
+  const detail = publicSkillDetail(pkg);
+  return detail.skill
+    ? {
+        ...detail.skill,
+        latestVersion: detail.latestVersion,
+        metadata: detail.metadata,
+      }
+    : null;
+}
+
 function sendArchive(reply: FastifyReply, params: { name: string; version: PackageVersionRecord }) {
   reply
     .header("content-type", "application/zip")
@@ -332,7 +343,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       items: await Promise.all(
         page.items.map(async (item) => {
           const pkg = await repo.getPackage(item.name);
-          return pkg ? publicSkillDetail(pkg).skill : null;
+          return pkg ? publicSkillListItem(pkg) : null;
         }),
       ).then((items) => items.filter(Boolean)),
       nextCursor: page.nextCursor,

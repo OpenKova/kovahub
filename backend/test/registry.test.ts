@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { strToU8, zipSync } from "fflate";
+import { strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../src/server.js";
 
@@ -143,6 +143,48 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("serves the Kova skill discovery and install contract", async () => {
+    const app = await buildServer();
+
+    const search = await app.inject("/api/v1/search?q=release&limit=5");
+    expect(search.statusCode).toBe(200);
+    expect(search.json().results[0]).toMatchObject({
+      slug: "release-notes-sherpa",
+      displayName: "Release Notes Sherpa",
+      version: "1.0.0",
+    });
+
+    const list = await app.inject("/api/v1/skills?limit=5");
+    expect(list.statusCode).toBe(200);
+    expect(list.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          slug: "release-notes-sherpa",
+          latestVersion: expect.objectContaining({ version: "1.0.0" }),
+        }),
+      ]),
+    );
+
+    const detail = await app.inject("/api/v1/skills/release-notes-sherpa");
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      skill: {
+        slug: "release-notes-sherpa",
+        displayName: "Release Notes Sherpa",
+      },
+      latestVersion: {
+        version: "1.0.0",
+      },
+    });
+
+    const download = await app.inject("/api/v1/download?slug=release-notes-sherpa&version=1.0.0");
+    expect(download.statusCode).toBe(200);
+    expect(download.headers["content-type"]).toContain("application/zip");
+    const files = unzipSync(new Uint8Array(download.rawPayload));
+    expect(Object.keys(files)).toContain("SKILL.md");
+    await app.close();
+  });
+
   it("publishes a plugin package with latest tag and downloadable archive", async () => {
     const app = await buildServer();
     const token = await registerAndLogin(app);
@@ -265,6 +307,25 @@ describe("registry api", () => {
     });
     expect(publish.statusCode).toBe(400);
     expect(publish.json().error).toContain("compatibility.pluginApi");
+    await app.close();
+  });
+
+  it("rejects scoped skill names that Kova cannot install as slugs", async () => {
+    const app = await buildServer();
+    const token = await registerAndLogin(app);
+    const publish = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: "@tester/scoped-skill",
+        displayName: "Scoped Skill",
+        family: "skill",
+        version: "0.1.0",
+      },
+    });
+    expect(publish.statusCode).toBe(400);
+    expect(publish.json().error).toContain("Skill packages require a Kova skill slug");
     await app.close();
   });
 
