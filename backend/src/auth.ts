@@ -18,6 +18,18 @@ const apiTokenParamsSchema = z.object({
   id: z.string().min(1),
 });
 
+const deviceStartSchema = z.object({
+  clientName: z.string().trim().min(1).max(80).optional(),
+});
+
+const deviceApproveSchema = z.object({
+  userCode: z.string().trim().min(4).max(32),
+});
+
+const deviceTokenSchema = z.object({
+  deviceCode: z.string().trim().min(8),
+});
+
 const optionalProfileText = (max: number) =>
   z.preprocess(
     (value) => {
@@ -131,6 +143,14 @@ function createPlainApiToken() {
   return `khp_${randomBytes(32).toString("base64url")}`;
 }
 
+function createDeviceCode() {
+  return `khdev_${randomBytes(32).toString("base64url")}`;
+}
+
+function createUserCode() {
+  return randomBytes(4).toString("hex").toUpperCase().replace(/^(.{4})(.{4})$/, "$1-$2");
+}
+
 function hashApiToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -213,6 +233,12 @@ function frontendAuthCallbackUrl(params: { token?: string; error?: string; retur
     hash.set("token", params.token);
     url.hash = hash.toString();
   }
+  return url.toString();
+}
+
+function frontendDeviceUrl(userCode: string) {
+  const url = new URL("/auth/device", siteUrl());
+  url.searchParams.set("user_code", userCode);
   return url.toString();
 }
 
@@ -412,6 +438,101 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
       const message = error instanceof Error ? error.message : "GitHub sign-in failed.";
       return redirectToFrontendAuthCallback(reply, { error: message, returnTo });
     }
+  });
+
+  app.post("/api/v1/auth/device/start", async (request, reply) => {
+    const parsed = deviceStartSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid device authorization request." };
+    }
+    const deviceCode = createDeviceCode();
+    const userCode = createUserCode();
+    const expiresIn = 10 * 60;
+    const interval = 3;
+    const authorization = await repo.createDeviceAuthorization({
+      deviceCode,
+      userCode,
+      clientName: parsed.data.clientName ?? null,
+      expiresAt: Date.now() + expiresIn * 1000,
+    });
+    return {
+      deviceCode: authorization.deviceCode,
+      userCode: authorization.userCode,
+      verificationUri: `${siteUrl()}/auth/device`,
+      verificationUriComplete: frontendDeviceUrl(authorization.userCode),
+      expiresIn,
+      interval,
+    };
+  });
+
+  app.post("/api/v1/auth/device/approve", async (request, reply) => {
+    const user = await requireSessionAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = deviceApproveSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid device approval payload." };
+    }
+    const authorization = await repo.approveDeviceAuthorization(parsed.data.userCode.toUpperCase(), user);
+    if (!authorization) {
+      reply.code(404);
+      return { error: "Device code was not found." };
+    }
+    if (authorization.status === "expired") {
+      reply.code(400);
+      return { error: "Device code expired." };
+    }
+    return {
+      approved: authorization.status === "approved",
+      userCode: authorization.userCode,
+      clientName: authorization.clientName ?? null,
+    };
+  });
+
+  app.post("/api/v1/auth/device/token", async (request, reply) => {
+    const parsed = deviceTokenSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid device token payload." };
+    }
+    const authorization = await repo.getDeviceAuthorization(parsed.data.deviceCode);
+    if (!authorization) {
+      reply.code(404);
+      return { error: "Device code was not found." };
+    }
+    if (authorization.status === "pending") {
+      reply.code(428);
+      return { error: "authorization_pending" };
+    }
+    if (authorization.status === "expired") {
+      reply.code(400);
+      return { error: "expired_token" };
+    }
+    if (authorization.status === "consumed") {
+      reply.code(400);
+      return { error: "already_used" };
+    }
+    const consumed = await repo.consumeDeviceAuthorization(parsed.data.deviceCode);
+    if (!consumed?.userId) {
+      reply.code(400);
+      return { error: "authorization_pending" };
+    }
+    const apiToken = createPlainApiToken();
+    const token = await repo.createApiToken({
+      userId: consumed.userId,
+      name: consumed.clientName ? `${consumed.clientName} device login` : "device login",
+      tokenHash: hashApiToken(apiToken),
+    });
+    return {
+      tokenType: "bearer",
+      accessToken: apiToken,
+      apiToken: publicApiToken(token),
+      user: {
+        id: consumed.userId,
+        handle: consumed.userHandle ?? null,
+      },
+    };
   });
 
   app.get("/api/v1/auth/me", async (request, reply) => {

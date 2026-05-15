@@ -283,6 +283,13 @@ export async function fetchMe() {
   return request<{ user: AuthUser }>("/api/v1/auth/me");
 }
 
+export async function approveDeviceLogin(userCode: string) {
+  return request<{ approved: boolean; userCode: string; clientName?: string | null }>("/api/v1/auth/device/approve", {
+    method: "POST",
+    body: JSON.stringify({ userCode }),
+  });
+}
+
 export async function fetchProfile(handle: string) {
   return request<{ profile: UserProfile }>(`/api/v1/profiles/${encodeURIComponent(handle)}`);
 }

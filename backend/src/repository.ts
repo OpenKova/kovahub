@@ -83,6 +83,19 @@ export type ApiTokenRecord = {
   lastUsedAt: number | null;
 };
 
+export type DeviceAuthorizationRecord = {
+  deviceCode: string;
+  userCode: string;
+  clientName?: string | null;
+  userId?: string | null;
+  userHandle?: string | null;
+  status: "pending" | "approved" | "consumed" | "expired";
+  createdAt: number;
+  expiresAt: number;
+  approvedAt?: number | null;
+  consumedAt?: number | null;
+};
+
 export type PackageCommentRecord = {
   id: string;
   packageName: string;
@@ -174,6 +187,10 @@ export type RegistryRepository = {
   listApiTokens(userId: string): Promise<ApiTokenRecord[]>;
   revokeApiToken(input: { userId: string; tokenId: string }): Promise<boolean>;
   findUserByApiTokenHash(tokenHash: string): Promise<AuthPrincipal | null>;
+  createDeviceAuthorization(input: { deviceCode: string; userCode: string; clientName?: string | null; expiresAt: number }): Promise<DeviceAuthorizationRecord>;
+  approveDeviceAuthorization(userCode: string, user: AuthPrincipal): Promise<DeviceAuthorizationRecord | null>;
+  getDeviceAuthorization(deviceCode: string): Promise<DeviceAuthorizationRecord | null>;
+  consumeDeviceAuthorization(deviceCode: string): Promise<DeviceAuthorizationRecord | null>;
   createOrganization(user: AuthPrincipal, input: OrganizationInput): Promise<OrganizationRecord>;
   listUserOrganizations(userId: string): Promise<OrganizationRecord[]>;
   getOrganizationByHandle(handle: string): Promise<OrganizationRecord | null>;
@@ -469,6 +486,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly usersByGithubId = new Map<string, string>();
   private readonly apiTokens = new Map<string, ApiTokenRecord>();
   private readonly apiTokensByHash = new Map<string, string>();
+  private readonly deviceAuthorizations = new Map<string, DeviceAuthorizationRecord>();
+  private readonly deviceAuthorizationsByUserCode = new Map<string, string>();
   private readonly organizations = new Map<string, OrganizationRecord>();
   private readonly organizationMembers = new Map<string, OrganizationMemberRecord>();
   private readonly packages = new Map<string, PackageRecord>();
@@ -653,6 +672,57 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     token.lastUsedAt = now();
     const user = this.users.get(token.userId);
     return user ? { id: user.id, handle: user.handle, email: user.email } : null;
+  }
+
+  async createDeviceAuthorization(input: {
+    deviceCode: string;
+    userCode: string;
+    clientName?: string | null;
+    expiresAt: number;
+  }) {
+    const record: DeviceAuthorizationRecord = {
+      deviceCode: input.deviceCode,
+      userCode: input.userCode,
+      clientName: input.clientName ?? null,
+      status: "pending",
+      createdAt: now(),
+      expiresAt: input.expiresAt,
+      approvedAt: null,
+      consumedAt: null,
+    };
+    this.deviceAuthorizations.set(record.deviceCode, record);
+    this.deviceAuthorizationsByUserCode.set(normalizeKey(record.userCode), record.deviceCode);
+    return record;
+  }
+
+  async approveDeviceAuthorization(userCode: string, user: AuthPrincipal) {
+    const deviceCode = this.deviceAuthorizationsByUserCode.get(normalizeKey(userCode));
+    const record = deviceCode ? this.deviceAuthorizations.get(deviceCode) : null;
+    if (!record) return null;
+    if (record.expiresAt <= now()) {
+      record.status = "expired";
+      return record;
+    }
+    if (record.status === "consumed") return record;
+    record.status = "approved";
+    record.userId = user.id;
+    record.userHandle = user.handle;
+    record.approvedAt = now();
+    return record;
+  }
+
+  async getDeviceAuthorization(deviceCode: string) {
+    const record = this.deviceAuthorizations.get(deviceCode) ?? null;
+    if (record?.status === "pending" && record.expiresAt <= now()) record.status = "expired";
+    return record;
+  }
+
+  async consumeDeviceAuthorization(deviceCode: string) {
+    const record = await this.getDeviceAuthorization(deviceCode);
+    if (!record || record.status !== "approved") return record;
+    record.status = "consumed";
+    record.consumedAt = now();
+    return record;
   }
 
   async createOrganization(user: AuthPrincipal, input: OrganizationInput) {

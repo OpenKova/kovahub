@@ -35,6 +35,7 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  approveDeviceLogin,
   clearToken,
   createOrganization,
   createApiToken,
@@ -916,6 +917,60 @@ function GitHubAuthCallback() {
         ) : null}
       </section>
     </main>
+  );
+}
+
+function DeviceAuthPage({ theme }: { theme: ThemeSettings }) {
+  const { user, setUser, hasSession } = useLandingUser();
+  const [searchParams] = useSearchParams();
+  const initialCode = searchParams.get("user_code") ?? "";
+  const [userCode, setUserCode] = useState(initialCode);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const returnTo = `/auth/device${userCode ? `?user_code=${encodeURIComponent(userCode)}` : ""}`;
+
+  async function approve(event: FormEvent) {
+    event.preventDefault();
+    setStatus(null);
+    setError(null);
+    try {
+      const result = await approveDeviceLogin(userCode);
+      setStatus(result.clientName ? `${result.clientName} is connected.` : "Device login approved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Device approval failed.");
+    }
+  }
+
+  return (
+    <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+      <section className="auth-card profile-auth-card">
+        <div className="section-title">
+          <KeyRound size={17} aria-hidden="true" />
+          <h2>Approve device login</h2>
+        </div>
+        {!hasSession && !user ? (
+          <>
+            <p className="muted">Sign in with GitHub to approve this KovaHub CLI login.</p>
+            <a className="content-primary-action" href={githubLoginUrl(returnTo)}>
+              <Github size={16} aria-hidden="true" />
+              Sign in with GitHub
+            </a>
+          </>
+        ) : (
+          <form className="device-auth-form" onSubmit={approve}>
+            <label>
+              Code
+              <input value={userCode} onChange={(event) => setUserCode(event.target.value.toUpperCase())} />
+            </label>
+            <button className="primary-action full" type="submit" disabled={!userCode.trim()}>
+              Approve login
+            </button>
+            {status ? <p className="form-success">{status}</p> : null}
+            {error ? <p className="form-error">{error}</p> : null}
+          </form>
+        )}
+      </section>
+    </LandingPageShell>
   );
 }
 
@@ -3353,6 +3408,7 @@ export default function App() {
       <Route path="/marketplace" element={<Marketplace />} />
       <Route path="/packages/*" element={<Marketplace />} />
       <Route path="/publish" element={<Marketplace publishMode />} />
+      <Route path="/auth/device" element={<DeviceAuthPage theme={theme} />} />
       <Route path="/auth/github/callback" element={<GitHubAuthCallback />} />
     </Routes>
   );

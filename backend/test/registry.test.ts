@@ -788,6 +788,60 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("supports CLI device login with GitHub session approval", async () => {
+    const app = await buildServer();
+    const jwt = await signInWithGitHub(app);
+
+    const start = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/device/start",
+      payload: { clientName: "test cli" },
+    });
+    expect(start.statusCode).toBe(200);
+    expect(start.json()).toMatchObject({
+      deviceCode: expect.any(String),
+      userCode: expect.any(String),
+      verificationUriComplete: expect.stringContaining("/auth/device"),
+    });
+
+    const pending = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/device/token",
+      payload: { deviceCode: start.json().deviceCode },
+    });
+    expect(pending.statusCode).toBe(428);
+    expect(pending.json().error).toBe("authorization_pending");
+
+    const approved = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/device/approve",
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { userCode: start.json().userCode },
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({
+      approved: true,
+      clientName: "test cli",
+    });
+
+    const token = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/device/token",
+      payload: { deviceCode: start.json().deviceCode },
+    });
+    expect(token.statusCode).toBe(200);
+    expect(token.json().accessToken).toEqual(expect.stringMatching(/^khp_/));
+
+    const whoami = await app.inject({
+      method: "GET",
+      url: "/api/v1/whoami",
+      headers: { authorization: `Bearer ${token.json().accessToken}` },
+    });
+    expect(whoami.statusCode).toBe(200);
+    expect(whoami.json().user.handle).toBe("tester");
+    await app.close();
+  });
+
   it("restores GitHub browser sessions after an in-memory dev restart", async () => {
     const app = await buildServer();
     const jwt = await signInWithGitHub(app);

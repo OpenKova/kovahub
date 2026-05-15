@@ -23,6 +23,7 @@ import {
   normalizeTopics,
   type ApiTokenRecord,
   type AuthPrincipal,
+  type DeviceAuthorizationRecord,
   type ListPackageReportsOptions,
   type ListPackagesOptions,
   type OrganizationInput,
@@ -98,6 +99,19 @@ type ApiTokenRow = QueryResultRow & {
   token_hash: string;
   created_at: Date;
   last_used_at: Date | null;
+};
+
+type DeviceAuthorizationRow = QueryResultRow & {
+  device_code: string;
+  user_code: string;
+  client_name: string | null;
+  user_id: string | null;
+  user_handle: string | null;
+  status: DeviceAuthorizationRecord["status"];
+  created_at: Date;
+  expires_at: Date;
+  approved_at: Date | null;
+  consumed_at: Date | null;
 };
 
 type OrganizationRow = QueryResultRow & {
@@ -265,6 +279,23 @@ function rowToApiToken(row: ApiTokenRow): ApiTokenRecord {
     tokenHash: row.token_hash,
     createdAt: timeMs(row.created_at),
     lastUsedAt: row.last_used_at ? timeMs(row.last_used_at) : null,
+  };
+}
+
+function rowToDeviceAuthorization(row: DeviceAuthorizationRow): DeviceAuthorizationRecord {
+  const expiresAt = timeMs(row.expires_at);
+  const status = row.status === "pending" && expiresAt <= Date.now() ? "expired" : row.status;
+  return {
+    deviceCode: row.device_code,
+    userCode: row.user_code,
+    clientName: row.client_name,
+    userId: row.user_id,
+    userHandle: row.user_handle,
+    status,
+    createdAt: timeMs(row.created_at),
+    expiresAt,
+    approvedAt: row.approved_at ? timeMs(row.approved_at) : null,
+    consumedAt: row.consumed_at ? timeMs(row.consumed_at) : null,
   };
 }
 
@@ -610,6 +641,132 @@ export class PostgresRegistryRepository implements RegistryRepository {
       [tokenHash],
     );
     return result.rows[0] ?? null;
+  }
+
+  async createDeviceAuthorization(input: {
+    deviceCode: string;
+    userCode: string;
+    clientName?: string | null;
+    expiresAt: number;
+  }) {
+    const result = await this.pool.query<DeviceAuthorizationRow>(
+      `
+        insert into device_authorizations (device_code, user_code, client_name, expires_at)
+        values ($1, $2, $3, $4)
+        returning
+          device_code,
+          user_code,
+          client_name,
+          user_id,
+          null::text as user_handle,
+          status,
+          created_at,
+          expires_at,
+          approved_at,
+          consumed_at
+      `,
+      [input.deviceCode, input.userCode, input.clientName ?? null, new Date(input.expiresAt)],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Device authorization creation failed.");
+    return rowToDeviceAuthorization(row);
+  }
+
+  async approveDeviceAuthorization(userCode: string, user: AuthPrincipal) {
+    const result = await this.pool.query<DeviceAuthorizationRow>(
+      `
+        update device_authorizations da
+        set
+          user_id = $2,
+          status = case when expires_at <= now() then 'expired' else 'approved' end,
+          approved_at = case when expires_at <= now() then approved_at else now() end
+        where da.user_code = $1 and da.status in ('pending', 'approved')
+        returning
+          da.device_code,
+          da.user_code,
+          da.client_name,
+          da.user_id,
+          (select handle from users where id = da.user_id) as user_handle,
+          da.status,
+          da.created_at,
+          da.expires_at,
+          da.approved_at,
+          da.consumed_at
+      `,
+      [userCode.trim().toUpperCase(), user.id],
+    );
+    const row = result.rows[0];
+    return row ? rowToDeviceAuthorization(row) : null;
+  }
+
+  async getDeviceAuthorization(deviceCode: string) {
+    const result = await this.pool.query<DeviceAuthorizationRow>(
+      `
+        update device_authorizations
+        set status = 'expired'
+        where device_code = $1 and status = 'pending' and expires_at <= now()
+        returning
+          device_code,
+          user_code,
+          client_name,
+          user_id,
+          (select handle from users where id = user_id) as user_handle,
+          status,
+          created_at,
+          expires_at,
+          approved_at,
+          consumed_at
+      `,
+      [deviceCode],
+    );
+    const expired = result.rows[0];
+    if (expired) return rowToDeviceAuthorization(expired);
+    const found = await this.pool.query<DeviceAuthorizationRow>(
+      `
+        select
+          da.device_code,
+          da.user_code,
+          da.client_name,
+          da.user_id,
+          u.handle as user_handle,
+          da.status,
+          da.created_at,
+          da.expires_at,
+          da.approved_at,
+          da.consumed_at
+        from device_authorizations da
+        left join users u on u.id = da.user_id
+        where da.device_code = $1
+        limit 1
+      `,
+      [deviceCode],
+    );
+    const row = found.rows[0];
+    return row ? rowToDeviceAuthorization(row) : null;
+  }
+
+  async consumeDeviceAuthorization(deviceCode: string) {
+    const result = await this.pool.query<DeviceAuthorizationRow>(
+      `
+        update device_authorizations da
+        set status = 'consumed', consumed_at = now()
+        where da.device_code = $1 and da.status = 'approved' and da.expires_at > now()
+        returning
+          da.device_code,
+          da.user_code,
+          da.client_name,
+          da.user_id,
+          (select handle from users where id = da.user_id) as user_handle,
+          da.status,
+          da.created_at,
+          da.expires_at,
+          da.approved_at,
+          da.consumed_at
+      `,
+      [deviceCode],
+    );
+    const row = result.rows[0];
+    return row ? rowToDeviceAuthorization(row) : this.getDeviceAuthorization(deviceCode);
   }
 
   async createOrganization(user: AuthPrincipal, input: OrganizationInput) {
