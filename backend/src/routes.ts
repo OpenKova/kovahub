@@ -17,6 +17,7 @@ const listQuerySchema = z.object({
   family: z.enum(packageFamilies).optional(),
   owner: z.string().trim().min(1).optional(),
   tag: z.string().trim().min(1).optional(),
+  sort: z.enum(["recent", "popular", "trending"]).optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
 });
@@ -99,6 +100,26 @@ function publicVersionDetail(pkg: PackageRecord, version: PackageVersionRecord) 
     version: {
       ...publicVersionSummary(version),
     },
+  };
+}
+
+async function recordPackageSignal(
+  reply: FastifyReply,
+  repo: RegistryRepository,
+  name: string,
+  signal: "install" | "star",
+) {
+  const pkg = await repo.getPackage(name);
+  if (!pkg) {
+    reply.code(404);
+    return { package: null, stats: null };
+  }
+  if (signal === "install") await repo.recordInstall(pkg.name);
+  else await repo.recordStar(pkg.name);
+  const updated = (await repo.getPackage(pkg.name)) ?? pkg;
+  return {
+    package: toPackageListItem(updated),
+    stats: updated.stats,
   };
 }
 
@@ -246,7 +267,7 @@ async function listPackageCatalog(
   request: FastifyRequest,
   reply: FastifyReply,
   repo: RegistryRepository,
-  filter: { family?: PackageFamily; families?: PackageFamily[]; owner?: string; tag?: string } = {},
+  filter: { family?: PackageFamily; families?: PackageFamily[]; owner?: string; tag?: string; sort?: "recent" | "popular" | "trending" } = {},
 ) {
   const parsed = listQuerySchema.safeParse(request.query);
   if (!parsed.success) {
@@ -317,6 +338,10 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
 
   app.get("/api/v1/packages/search", async (request, reply) => {
     return searchPackageCatalog(request, reply, repo);
+  });
+
+  app.get("/api/v1/packages/trending", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { sort: "trending" });
   });
 
   app.get("/api/v1/publishers/:handle/packages", async (request, reply) => {
@@ -431,6 +456,24 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { package: null, version: null };
     }
     return publicVersionDetail(found.pkg, found.version);
+  });
+
+  app.post("/api/v1/packages/:name/install", async (request, reply) => {
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package install signal." };
+    }
+    return recordPackageSignal(reply, repo, parsed.data.name, "install");
+  });
+
+  app.post("/api/v1/packages/:name/star", async (request, reply) => {
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package star signal." };
+    }
+    return recordPackageSignal(reply, repo, parsed.data.name, "star");
   });
 
   app.get("/api/v1/packages/:name/download", async (request, reply) => {

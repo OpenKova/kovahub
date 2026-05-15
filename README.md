@@ -95,6 +95,8 @@ Implemented in the scaffold:
 - S3/R2-compatible archive storage for hosted persistent mode.
 - Package list/search.
 - Package topics, owner filters, tag filters, cursor pagination, and dedicated publisher/topic pages.
+- Discovery sorting by recent, trending, and popular signals.
+- Download, install, and star counters exposed in package stats.
 - Package detail page with compatibility, capability signals, stats, and version history.
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
@@ -112,10 +114,13 @@ Registry-compatible read routes:
 - `GET /.well-known/kovahub.json`
 - `GET /api/v1/packages?q=...&family=...&owner=...&tag=...&cursor=...&limit=...`
 - `GET /api/v1/packages/search?q=...&family=...&owner=...&tag=...`
+- `GET /api/v1/packages/trending`
 - `GET /api/v1/packages/:name`
 - `GET /api/v1/packages/:name/versions`
 - `GET /api/v1/packages/:name/versions/:version`
 - `GET /api/v1/packages/:name/download?version=...`
+- `POST /api/v1/packages/:name/install`
+- `POST /api/v1/packages/:name/star`
 - `GET /api/v1/publishers/:handle/packages`
 - `GET /api/v1/tags/:tag/packages`
 - `GET /api/v1/plugins`
@@ -174,7 +179,7 @@ Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MA
 
 ## Remaining Hardening
 
-1. Add ranking, install metrics, saved/starred packages, and richer discovery signals.
+1. Add user-specific saved/starred package state.
 2. Add compatibility smoke tests against the local Kova reference contracts.
 
 ## References

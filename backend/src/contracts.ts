@@ -52,6 +52,13 @@ export type PackageFile = {
   contentType?: string;
 };
 
+export type PackageStats = {
+  downloads: number;
+  installs: number;
+  stars: number;
+  versions: number;
+};
+
 export type PackageListItem = {
   name: string;
   displayName: string;
@@ -70,6 +77,7 @@ export type PackageListItem = {
   verificationTier?: string | null;
   scanStatus?: PackageVerificationSummary["scanStatus"] | null;
   moderationStatus?: PackageVerificationSummary["moderationStatus"] | null;
+  stats?: PackageStats;
 };
 
 export type PackageVersionRecord = {
@@ -91,12 +99,7 @@ export type PackageRecord = PackageListItem & {
   capabilities?: PackageCapabilitySummary | null;
   verification?: PackageVerificationSummary | null;
   versions: PackageVersionRecord[];
-  stats: {
-    downloads: number;
-    installs: number;
-    stars: number;
-    versions: number;
-  };
+  stats: PackageStats;
 };
 
 const semverLike = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
@@ -207,5 +210,6 @@ export function toPackageListItem(record: PackageRecord): PackageListItem {
     verificationTier: record.verificationTier,
     scanStatus: record.verification?.scanStatus ?? null,
     moderationStatus: record.verification?.moderationStatus ?? null,
+    stats: record.stats,
   };
 }

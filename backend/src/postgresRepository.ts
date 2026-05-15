@@ -140,6 +140,24 @@ function packageSearchPredicate(param: string) {
   )`;
 }
 
+function statsInt(field: "downloads" | "installs" | "stars") {
+  return `coalesce((p.stats->>'${field}')::int, 0)`;
+}
+
+function discoveryScoreExpression() {
+  return `(${statsInt("downloads")} + (${statsInt("installs")} * 3) + (${statsInt("stars")} * 8) + case when p.is_official then 25 else 0 end)`;
+}
+
+function packageOrderBy(sort: ListPackagesOptions["sort"] = "recent") {
+  if (sort === "popular") {
+    return `order by ${statsInt("stars")} desc, ${statsInt("downloads")} desc, ${statsInt("installs")} desc, p.updated_at desc, p.display_name asc`;
+  }
+  if (sort === "trending") {
+    return `order by ${discoveryScoreExpression()} desc, p.updated_at desc, p.display_name asc`;
+  }
+  return "order by p.is_official desc, p.updated_at desc, p.display_name asc";
+}
+
 function normalizeStats(stats: Partial<PackageRecord["stats"]> | null): PackageRecord["stats"] {
   return {
     downloads: stats?.downloads ?? 0,
@@ -449,7 +467,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
       `
         ${packageSelect}
         ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-        order by p.is_official desc, p.updated_at desc, p.display_name asc
+        ${packageOrderBy(options.sort)}
         limit $${params.length - 1}
         offset $${params.length}
       `,
@@ -489,8 +507,10 @@ export class PostgresRegistryRepository implements RegistryRepository {
           when exists(select 1 from unnest(p.topics) topic where lower(topic) = lower(${qParam})) then 50
           when coalesce(p.summary, '') ilike '%' || ${qParam} || '%' then 30
           else 10
-        end
+        end + ln(1 + ${discoveryScoreExpression()})
       `;
+    } else {
+      scoreExpression = `1 + ln(1 + ${discoveryScoreExpression()})`;
     }
 
     params.push(limit);
@@ -691,18 +711,30 @@ export class PostgresRegistryRepository implements RegistryRepository {
   }
 
   async recordDownload(name: string) {
+    await this.incrementStat(name, "downloads");
+  }
+
+  async recordInstall(name: string) {
+    await this.incrementStat(name, "installs");
+  }
+
+  async recordStar(name: string) {
+    await this.incrementStat(name, "stars");
+  }
+
+  private async incrementStat(name: string, field: "downloads" | "installs" | "stars") {
     await this.pool.query(
       `
         update packages
         set stats = jsonb_set(
           stats,
-          '{downloads}',
-          to_jsonb(coalesce((stats->>'downloads')::int, 0) + 1),
+          $2::text[],
+          to_jsonb(coalesce((stats->>$3)::int, 0) + 1),
           true
         )
         where name = $1
       `,
-      [normalizeKey(name)],
+      [normalizeKey(name), [field], field],
     );
   }
 

@@ -45,6 +45,7 @@ export type ListPackagesOptions = {
   families?: PackageFamily[];
   owner?: string;
   tag?: string;
+  sort?: "recent" | "popular" | "trending";
   limit?: number;
   cursor?: string;
 };
@@ -82,6 +83,8 @@ export type RegistryRepository = {
   publishPackage(input: PreparedPublishPackageInput, owner: AuthPrincipal): Promise<PackageRecord>;
   getArchive(name: string, selector?: { version?: string; tag?: string }): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   recordDownload(name: string): Promise<void>;
+  recordInstall(name: string): Promise<void>;
+  recordStar(name: string): Promise<void>;
 };
 
 export type ArchiveFileInput = {
@@ -158,13 +161,14 @@ function packageMatches(pkg: PackageRecord, query: string) {
 
 function scorePackage(pkg: PackageRecord, query: string) {
   const q = query.trim().toLowerCase();
-  if (!q || q === "*") return 1;
-  if (pkg.name.toLowerCase() === q) return 100;
-  if (pkg.name.toLowerCase().includes(q)) return 80;
-  if (pkg.displayName.toLowerCase().includes(q)) return 60;
-  if ((pkg.topics ?? []).some((tag) => tag.toLowerCase() === q)) return 50;
-  if ((pkg.summary ?? "").toLowerCase().includes(q)) return 30;
-  return 10;
+  const signalBoost = Math.log1p(discoveryScore(pkg));
+  if (!q || q === "*") return 1 + signalBoost;
+  if (pkg.name.toLowerCase() === q) return 100 + signalBoost;
+  if (pkg.name.toLowerCase().includes(q)) return 80 + signalBoost;
+  if (pkg.displayName.toLowerCase().includes(q)) return 60 + signalBoost;
+  if ((pkg.topics ?? []).some((tag) => tag.toLowerCase() === q)) return 50 + signalBoost;
+  if ((pkg.summary ?? "").toLowerCase().includes(q)) return 30 + signalBoost;
+  return 10 + signalBoost;
 }
 
 function normalizeTopic(value: string) {
@@ -173,6 +177,39 @@ function normalizeTopic(value: string) {
 
 export function normalizeTopics(values: string[] = []) {
   return [...new Set(values.map(normalizeTopic).filter(Boolean))];
+}
+
+function discoveryScore(pkg: PackageRecord) {
+  return (
+    (pkg.stats?.downloads ?? 0) +
+    (pkg.stats?.installs ?? 0) * 3 +
+    (pkg.stats?.stars ?? 0) * 8 +
+    (pkg.isOfficial ? 25 : 0)
+  );
+}
+
+function comparePackages(left: PackageRecord, right: PackageRecord, sort: ListPackagesOptions["sort"] = "recent") {
+  if (sort === "popular") {
+    return (
+      (right.stats?.stars ?? 0) - (left.stats?.stars ?? 0) ||
+      (right.stats?.downloads ?? 0) - (left.stats?.downloads ?? 0) ||
+      (right.stats?.installs ?? 0) - (left.stats?.installs ?? 0) ||
+      right.updatedAt - left.updatedAt ||
+      left.displayName.localeCompare(right.displayName)
+    );
+  }
+  if (sort === "trending") {
+    return (
+      discoveryScore(right) - discoveryScore(left) ||
+      right.updatedAt - left.updatedAt ||
+      left.displayName.localeCompare(right.displayName)
+    );
+  }
+  return (
+    Number(right.isOfficial) - Number(left.isOfficial) ||
+    right.updatedAt - left.updatedAt ||
+    left.displayName.localeCompare(right.displayName)
+  );
 }
 
 export function defaultFilesFor(input: PublishPackageInput) {
@@ -426,7 +463,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   async listPackages(options: ListPackagesOptions = {}) {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
     const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
-    const filtered = this.sortedPackages().filter((pkg) => {
+    const filtered = this.sortedPackages(options.sort).filter((pkg) => {
       if (options.family && pkg.family !== options.family) return false;
       if (options.families?.length && !options.families.includes(pkg.family)) return false;
       if (options.owner && normalizeKey(pkg.ownerHandle ?? "") !== normalizeKey(options.owner)) return false;
@@ -444,7 +481,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
 
   async searchPackages(options: SearchPackagesOptions) {
     const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
-    return this.sortedPackages()
+    return this.sortedPackages("trending")
       .filter((pkg) => {
         if (options.family && pkg.family !== options.family) return false;
         if (options.families?.length && !options.families.includes(pkg.family)) return false;
@@ -554,13 +591,18 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     if (pkg) pkg.stats.downloads += 1;
   }
 
-  private sortedPackages() {
-    return [...this.packages.values()].sort(
-      (left, right) =>
-        Number(right.isOfficial) - Number(left.isOfficial) ||
-        right.updatedAt - left.updatedAt ||
-        left.displayName.localeCompare(right.displayName),
-    );
+  async recordInstall(name: string) {
+    const pkg = await this.getPackage(name);
+    if (pkg) pkg.stats.installs += 1;
+  }
+
+  async recordStar(name: string) {
+    const pkg = await this.getPackage(name);
+    if (pkg) pkg.stats.stars += 1;
+  }
+
+  private sortedPackages(sort?: ListPackagesOptions["sort"]) {
+    return [...this.packages.values()].sort((left, right) => comparePackages(left, right, sort));
   }
 
   private seedPackages() {

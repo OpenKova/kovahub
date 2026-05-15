@@ -4,6 +4,7 @@ import type {
   PackageDetail,
   PackageFamily,
   PackageListItem,
+  PackageSort,
   PublishArchiveMetadata,
   PublishPayload,
 } from "./types";
@@ -51,6 +52,7 @@ export type FetchPackagesParams = {
   family?: PackageFamily;
   owner?: string;
   tag?: string;
+  sort?: PackageSort;
   cursor?: string | null;
   limit?: number;
 };
@@ -61,6 +63,7 @@ export async function fetchPackages(params: FetchPackagesParams = {}) {
   if (params.family) query.set("family", params.family);
   if (params.owner) query.set("owner", params.owner);
   if (params.tag) query.set("tag", params.tag);
+  if (params.sort) query.set("sort", params.sort);
   if (params.cursor) query.set("cursor", params.cursor);
   query.set("limit", String(params.limit ?? 100));
   return request<{ items: PackageListItem[]; nextCursor: string | null }>(

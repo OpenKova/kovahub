@@ -52,6 +52,7 @@ import type {
   PackageDetail,
   PackageFamily,
   PackageListItem,
+  PackageSort,
   PublishArchiveMetadata,
   PublishPayload,
 } from "./types";
@@ -60,6 +61,12 @@ const familyLabels: Record<PackageFamily, string> = {
   skill: "Skill",
   "code-plugin": "Code plugin",
   "bundle-plugin": "Bundle plugin",
+};
+
+const sortLabels: Record<PackageSort, string> = {
+  recent: "Recent",
+  popular: "Popular",
+  trending: "Trending",
 };
 
 const familyIcons: Record<PackageFamily, typeof Sparkles> = {
@@ -194,6 +201,11 @@ function formatDate(value: number) {
   );
 }
 
+function formatCompactNumber(value: number | undefined, fallback: string) {
+  if (typeof value !== "number") return fallback;
+  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
 function safeLocalPath(value: string | null) {
   if (value?.startsWith("/") && !value.startsWith("//")) return value;
   return "/publish";
@@ -203,12 +215,15 @@ function packageRoute(name: string) {
   return `/packages/${encodeURIComponent(name)}`;
 }
 
-function marketplaceRoute(params: { q?: string; family?: PackageFamily; owner?: string; tag?: string } = {}) {
+function marketplaceRoute(
+  params: { q?: string; family?: PackageFamily; owner?: string; tag?: string; sort?: PackageSort } = {},
+) {
   const query = new URLSearchParams();
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.family) query.set("family", params.family);
   if (params.owner?.trim()) query.set("owner", params.owner.trim());
   if (params.tag?.trim()) query.set("tag", params.tag.trim());
+  if (params.sort) query.set("sort", params.sort);
   const suffix = query.toString();
   return `/marketplace${suffix ? `?${suffix}` : ""}`;
 }
@@ -229,6 +244,10 @@ function useRoutePackageName() {
 
 function parseRouteFamily(value: string | null): PackageFamily | "all" {
   return value && value in familyLabels ? (value as PackageFamily) : "all";
+}
+
+function parseRouteSort(value: string | null): PackageSort {
+  return value && value in sortLabels ? (value as PackageSort) : "recent";
 }
 
 function topicsFor(item: Pick<PackageListItem, "topics">) {
@@ -420,8 +439,11 @@ function toHomeCard(item: PackageListItem, index: number, kind?: HomeCardKind): 
     family: item.family,
     href: packageRoute(item.name),
     version: item.latestVersion,
-    stars: ["112", "147", "144", "229", "165", "3.6k"][index % 6] ?? "112",
-    downloads: ["12.2k", "38.0k", "43.7k", "28.0k", "18.7k", "436.1k"][index % 6] ?? "12.2k",
+    stars: formatCompactNumber(item.stats?.stars, ["112", "147", "144", "229", "165", "3.6k"][index % 6] ?? "112"),
+    downloads: formatCompactNumber(
+      item.stats?.downloads,
+      ["12.2k", "38.0k", "43.7k", "28.0k", "18.7k", "436.1k"][index % 6] ?? "12.2k",
+    ),
     kind: resolvedKind,
   };
 }
@@ -516,6 +538,8 @@ function PackageRow({ item, active }: { item: PackageListItem; active: boolean }
         <span className="package-row-meta">
           <span>{familyLabels[item.family]}</span>
           {item.latestVersion ? <span>v{item.latestVersion}</span> : null}
+          {item.stats ? <span>{formatCompactNumber(item.stats.downloads, "0")} downloads</span> : null}
+          {item.stats ? <span>{formatCompactNumber(item.stats.stars, "0")} stars</span> : null}
           {review ? <span>{review}</span> : null}
           <span>{formatDate(item.updatedAt)}</span>
         </span>
@@ -1559,6 +1583,7 @@ function DirectoryPackageCard({ item }: { item: PackageListItem }) {
         {topics.map((topic) => (
           <span key={topic}>#{topic}</span>
         ))}
+        {item.stats ? <span>{formatCompactNumber(item.stats.downloads, "0")} downloads</span> : null}
         {review ? <span>{review}</span> : null}
         <span>{formatDate(item.updatedAt)}</span>
       </div>
@@ -1862,6 +1887,7 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
   const [detail, setDetail] = useState<PackageDetail | null>(null);
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [family, setFamily] = useState<PackageFamily | "all">(parseRouteFamily(searchParams.get("family")));
+  const [sort, setSort] = useState<PackageSort>(parseRouteSort(searchParams.get("sort")));
   const [ownerFilter, setOwnerFilter] = useState(searchParams.get("owner") ?? "");
   const [tagFilter, setTagFilter] = useState(searchParams.get("tag") ?? "");
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -1875,6 +1901,7 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
   useEffect(() => {
     setQuery(searchParams.get("q") ?? "");
     setFamily(parseRouteFamily(searchParams.get("family")));
+    setSort(parseRouteSort(searchParams.get("sort")));
     setOwnerFilter(searchParams.get("owner") ?? "");
     setTagFilter(searchParams.get("tag") ?? "");
   }, [searchParams]);
@@ -1890,6 +1917,7 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
         family: family === "all" ? undefined : family,
         owner: ownerFilter.trim() || undefined,
         tag: tagFilter.trim() || undefined,
+        sort,
         cursor,
         limit: 20,
       });
@@ -1901,7 +1929,7 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
       if (append) setLoadingMore(false);
       else setLoading(false);
     }
-  }, [family, ownerFilter, query, tagFilter]);
+  }, [family, ownerFilter, query, sort, tagFilter]);
 
   useEffect(() => {
     void loadPackages();
@@ -1929,6 +1957,7 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
     const next = new URLSearchParams();
     if (query.trim()) next.set("q", query.trim());
     if (family !== "all") next.set("family", family);
+    if (sort !== "recent") next.set("sort", sort);
     if (ownerFilter.trim()) next.set("owner", ownerFilter.trim());
     if (tagFilter.trim()) next.set("tag", tagFilter.trim());
     setSearchParams(next);
@@ -1993,6 +2022,24 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
                   }}
                 >
                   {value === "all" ? "All" : familyLabels[value]}
+                </button>
+              ))}
+            </div>
+            <div className="filter-row" aria-label="Package sort">
+              {(["recent", "trending", "popular"] as const).map((value) => (
+                <button
+                  className={sort === value ? "is-active" : ""}
+                  type="button"
+                  key={value}
+                  onClick={() => {
+                    setSort(value);
+                    const next = new URLSearchParams(searchParams);
+                    if (value === "recent") next.delete("sort");
+                    else next.set("sort", value);
+                    setSearchParams(next);
+                  }}
+                >
+                  {sortLabels[value]}
                 </button>
               ))}
             </div>

@@ -263,6 +263,32 @@ describe("registry api", () => {
     const topicList = await app.inject("/api/v1/packages?tag=context");
     expect(topicList.statusCode).toBe(200);
     expect(topicList.json().items.map((item: { name: string }) => item.name)).toContain("@openkova/context-bridge");
+    expect(topicList.json().items[0].stats).toMatchObject({
+      downloads: expect.any(Number),
+      installs: expect.any(Number),
+      stars: expect.any(Number),
+    });
+
+    const installSignal = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages/%40openkova%2Fcontext-bridge/install",
+    });
+    expect(installSignal.statusCode).toBe(200);
+    expect(installSignal.json().stats.installs).toBe(1);
+
+    const starSignal = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages/%40openkova%2Fcontext-bridge/star",
+    });
+    expect(starSignal.statusCode).toBe(200);
+    expect(starSignal.json().stats.stars).toBe(1);
+
+    const trending = await app.inject("/api/v1/packages/trending");
+    expect(trending.statusCode).toBe(200);
+    expect(trending.json().items[0]).toMatchObject({
+      name: "@openkova/context-bridge",
+      stats: expect.objectContaining({ installs: 1, stars: 1 }),
+    });
 
     const topicRoute = await app.inject("/api/v1/tags/gateway/packages");
     expect(topicRoute.statusCode).toBe(200);
@@ -389,6 +415,10 @@ describe("registry api", () => {
     expect(download.statusCode).toBe(200);
     expect(download.headers["content-type"]).toContain("application/zip");
     expect(download.rawPayload.byteLength).toBeGreaterThan(20);
+
+    const detail = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin");
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().package.stats.downloads).toBe(1);
     await app.close();
   });
 

@@ -1,5 +1,6 @@
 export type PackageFamily = "skill" | "code-plugin" | "bundle-plugin";
 export type PackageChannel = "official" | "community" | "private";
+export type PackageSort = "recent" | "popular" | "trending";
 
 export type PackageCompatibility = {
   pluginApiRange?: string;
@@ -40,6 +41,13 @@ export type PackageFile = {
   contentType?: string;
 };
 
+export type PackageStats = {
+  downloads: number;
+  installs: number;
+  stars: number;
+  versions: number;
+};
+
 export type PackageVersionSummary = {
   version: string;
   createdAt: number;
@@ -70,6 +78,7 @@ export type PackageListItem = {
   verificationTier?: string | null;
   scanStatus?: PackageVerification["scanStatus"] | null;
   moderationStatus?: PackageVerification["moderationStatus"] | null;
+  stats?: PackageStats;
 };
 
 export type PackageDetail = {
@@ -80,12 +89,7 @@ export type PackageDetail = {
         capabilities?: PackageCapabilities | null;
         verification?: PackageVerification | null;
         versions?: PackageVersionSummary[];
-        stats?: {
-          downloads: number;
-          installs: number;
-          stars: number;
-          versions: number;
-        };
+        stats?: PackageStats;
       })
     | null;
   owner?: {
