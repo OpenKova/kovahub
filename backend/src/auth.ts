@@ -282,9 +282,15 @@ async function verifyJwtPrincipal(request: FastifyRequest) {
 async function requireSessionAuth(
   request: FastifyRequest,
   reply: FastifyReply,
+  repo: RegistryRepository,
 ): Promise<AuthPrincipal | null> {
   const user = await verifyJwtPrincipal(request);
-  if (user) return user;
+  if (user) {
+    const account = await repo.findUserById(user.id);
+    if (account) return { id: account.id, handle: account.handle, email: account.email };
+    reply.code(401).send({ error: "Session expired. Sign in with GitHub again." });
+    return null;
+  }
   reply.code(401).send({ error: "Session authentication required." });
   return null;
 }
@@ -295,7 +301,12 @@ export async function requireAuth(
   repo: RegistryRepository,
 ): Promise<AuthPrincipal | null> {
   const jwtUser = await verifyJwtPrincipal(request);
-  if (jwtUser) return jwtUser;
+  if (jwtUser) {
+    const account = await repo.findUserById(jwtUser.id);
+    if (account) return { id: account.id, handle: account.handle, email: account.email };
+    reply.code(401).send({ error: "Session expired. Sign in with GitHub again." });
+    return null;
+  }
 
   const token = bearerToken(request);
   if (token?.startsWith("khp_")) {
@@ -390,7 +401,7 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
   });
 
   app.get("/api/v1/auth/profile", async (request, reply) => {
-    const user = await requireSessionAuth(request, reply);
+    const user = await requireSessionAuth(request, reply, repo);
     if (!user) return reply;
     const account = await repo.findUserById(user.id);
     if (!account) {
@@ -401,7 +412,7 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
   });
 
   app.patch("/api/v1/auth/profile", async (request, reply) => {
-    const user = await requireSessionAuth(request, reply);
+    const user = await requireSessionAuth(request, reply, repo);
     if (!user) return reply;
     const parsed = profileUpdateSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -414,14 +425,14 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
   });
 
   app.get("/api/v1/auth/tokens", async (request, reply) => {
-    const user = await requireSessionAuth(request, reply);
+    const user = await requireSessionAuth(request, reply, repo);
     if (!user) return reply;
     const tokens = await repo.listApiTokens(user.id);
     return { tokens: tokens.map(publicApiToken) };
   });
 
   app.post("/api/v1/auth/tokens", async (request, reply) => {
-    const user = await requireSessionAuth(request, reply);
+    const user = await requireSessionAuth(request, reply, repo);
     if (!user) return reply;
     const parsed = apiTokenSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -440,7 +451,7 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
   });
 
   app.delete("/api/v1/auth/tokens/:id", async (request, reply) => {
-    const user = await requireSessionAuth(request, reply);
+    const user = await requireSessionAuth(request, reply, repo);
     if (!user) return reply;
     const parsed = apiTokenParamsSchema.safeParse(request.params);
     if (!parsed.success) {

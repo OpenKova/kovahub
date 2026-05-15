@@ -579,6 +579,45 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("rejects stale browser sessions without a 500", async () => {
+    const app = await buildServer();
+    const staleJwt = app.jwt.sign(
+      {
+        id: "missing-user",
+        handle: "missing",
+        email: "missing@example.com",
+      },
+      { sub: "missing-user" },
+    );
+
+    const tokens = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/tokens",
+      headers: { authorization: `Bearer ${staleJwt}` },
+      payload: { name: "local cli" },
+    });
+    expect(tokens.statusCode).toBe(401);
+    expect(tokens.json().error).toBe("Session expired. Sign in with GitHub again.");
+
+    const publish = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${staleJwt}` },
+      payload: {
+        name: "@missing/session-plugin",
+        family: "code-plugin",
+        version: "0.1.0",
+        compatibility: {
+          pluginApi: "^1.0.0",
+          minGatewayVersion: "2026.3.0",
+        },
+      },
+    });
+    expect(publish.statusCode).toBe(401);
+    expect(publish.json().error).toBe("Session expired. Sign in with GitHub again.");
+    await app.close();
+  });
+
   it("lets GitHub users maintain public profile metadata", async () => {
     const app = await buildServer();
     const jwt = await signInWithGitHub(app);

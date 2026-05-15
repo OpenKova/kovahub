@@ -160,25 +160,38 @@ function useThemeSettings(): ThemeSettings {
 }
 
 function useLandingUser() {
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUserState] = useState<AuthUser | null>(null);
+  const [hasSession, setHasSession] = useState(() => Boolean(getStoredToken()));
+
+  const setUser = useCallback((nextUser: AuthUser | null) => {
+    setUserState(nextUser);
+    setHasSession(Boolean(nextUser) || Boolean(getStoredToken()));
+  }, []);
 
   useEffect(() => {
-    if (!getStoredToken()) return;
+    if (!getStoredToken()) {
+      setHasSession(false);
+      return;
+    }
     let active = true;
     fetchMe()
       .then((result) => {
-        if (active) setUser(result.user);
+        if (!active) return;
+        setUserState(result.user);
+        setHasSession(true);
       })
       .catch(() => {
         clearToken();
-        if (active) setUser(null);
+        if (!active) return;
+        setUserState(null);
+        setHasSession(false);
       });
     return () => {
       active = false;
     };
   }, []);
 
-  return { user, setUser };
+  return { user, setUser, hasSession };
 }
 
 function usePackageCatalog() {
@@ -2108,12 +2121,11 @@ function nullableProfileText(value: string) {
 }
 
 function ProfilePage({ theme }: { theme: ThemeSettings }) {
-  const { user, setUser } = useLandingUser();
+  const { user, setUser, hasSession } = useLandingUser();
   const [form, setForm] = useState<ProfileFormState | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const hasSession = Boolean(getStoredToken());
 
   useEffect(() => {
     if (user) setForm(profileFormFromUser(user));
@@ -2568,13 +2580,17 @@ function SearchPage({ theme }: { theme: ThemeSettings }) {
 }
 
 function StarsPage({ theme }: { theme: ThemeSettings }) {
-  const { user, setUser } = useLandingUser();
+  const { user, setUser, hasSession } = useLandingUser();
   const [items, setItems] = useState<PackageListItem[]>([]);
-  const [loading, setLoading] = useState(Boolean(getStoredToken()));
+  const [loading, setLoading] = useState(hasSession);
   const [error, setError] = useState<string | null>(null);
-  const hasSession = Boolean(getStoredToken());
 
   useEffect(() => {
+    if (!hasSession) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     if (!user) return;
     let active = true;
     setLoading(true);
@@ -2592,7 +2608,7 @@ function StarsPage({ theme }: { theme: ThemeSettings }) {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [hasSession, user]);
 
   if (!hasSession && !user) {
     return (
@@ -2647,13 +2663,17 @@ function StarsPage({ theme }: { theme: ThemeSettings }) {
 }
 
 function DashboardPage({ theme }: { theme: ThemeSettings }) {
-  const { user, setUser } = useLandingUser();
+  const { user, setUser, hasSession } = useLandingUser();
   const [items, setItems] = useState<PackageListItem[]>([]);
-  const [loading, setLoading] = useState(Boolean(getStoredToken()));
+  const [loading, setLoading] = useState(hasSession);
   const [error, setError] = useState<string | null>(null);
-  const hasSession = Boolean(getStoredToken());
 
   useEffect(() => {
+    if (!hasSession) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     if (!user) return;
     let active = true;
     setLoading(true);
@@ -2671,7 +2691,7 @@ function DashboardPage({ theme }: { theme: ThemeSettings }) {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [hasSession, user]);
 
   if (!hasSession && !user) {
     return (
