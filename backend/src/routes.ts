@@ -33,6 +33,7 @@ const searchQuerySchema = z.object({
 
 const packageParamsSchema = z.object({ name: z.string().min(1) });
 const packageVersionParamsSchema = packageParamsSchema.extend({ version: z.string().min(1) });
+const packageNameLike = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
 const skillParamsSchema = z.object({ slug: z.string().min(1) });
 const publisherParamsSchema = z.object({ handle: z.string().trim().min(1) });
 const tagParamsSchema = z.object({ tag: z.string().trim().min(1) });
@@ -46,6 +47,21 @@ const commentBodySchema = z.object({
 });
 const packageReportSchema = z.object({
   reason: z.string().trim().min(3).max(1000),
+});
+const packageSettingsSchema = z.object({
+  displayName: z.string().trim().min(1).max(120).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(48)).optional(),
+  channel: z.enum(["community", "private", "official"]).optional(),
+});
+const packageRenameSchema = z.object({
+  name: z.string().trim().min(1).max(214).regex(packageNameLike),
+});
+const packageTransferSchema = z.object({
+  targetHandle: z.string().trim().min(1).max(80),
+});
+const packageVersionYankSchema = z.object({
+  message: z.string().trim().max(500).nullable().optional(),
 });
 const downloadQuerySchema = z.object({
   version: z.string().optional(),
@@ -79,6 +95,8 @@ function publicVersionSummary(version: PackageVersionRecord) {
   return {
     version: version.version,
     createdAt: version.createdAt,
+    yankedAt: version.yankedAt ?? null,
+    yankMessage: version.yankMessage ?? null,
     changelog: version.changelog,
     distTags: version.distTags,
     files: version.files,
@@ -93,9 +111,15 @@ function publicVersionListItem(version: PackageVersionRecord) {
   return {
     version: version.version,
     createdAt: version.createdAt,
+    yankedAt: version.yankedAt ?? null,
+    yankMessage: version.yankMessage ?? null,
     changelog: version.changelog,
     distTags: version.distTags,
   };
+}
+
+function isDeletedPackage(pkg: PackageRecord | null | undefined) {
+  return Boolean(pkg?.deletedAt);
 }
 
 function publicVersionDetail(pkg: PackageRecord, version: PackageVersionRecord) {
@@ -171,7 +195,7 @@ async function recordPackageSignal(
   signal: "install" | "star",
 ) {
   const pkg = await repo.getPackage(name);
-  if (!pkg) {
+  if (!pkg || isDeletedPackage(pkg)) {
     reply.code(404);
     return { package: null, stats: null };
   }
@@ -507,6 +531,152 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     }
   });
 
+  app.get("/api/v1/me/packages", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid owner package list request." };
+    }
+    return repo.listPackages({
+      owner: user.handle,
+      includeDeleted: true,
+      limit: query.data.limit,
+      cursor: query.data.cursor,
+    });
+  });
+
+  app.patch("/api/v1/packages/:name/settings", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageSettingsSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package settings request." : body.error.issues[0]?.message ?? "Invalid package settings payload." };
+    }
+    try {
+      const pkg = await repo.updatePackageSettings(params.data.name, user, body.data);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package settings update failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/rename", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageRenameSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package rename request." : body.error.issues[0]?.message ?? "Invalid package rename payload." };
+    }
+    try {
+      const pkg = await repo.renamePackage(params.data.name, user, body.data.name);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package rename failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/transfer", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageTransferSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package transfer request." : body.error.issues[0]?.message ?? "Invalid package transfer payload." };
+    }
+    try {
+      const pkg = await repo.transferPackage(params.data.name, user, body.data.targetHandle);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package transfer failed." };
+    }
+  });
+
+  app.delete("/api/v1/packages/:name", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package delete request." };
+    }
+    try {
+      const pkg = await repo.setPackageDeleted(params.data.name, user, true);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package delete failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/restore", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package restore request." };
+    }
+    try {
+      const pkg = await repo.setPackageDeleted(params.data.name, user, false);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package restore failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/versions/:version/yank", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageVersionParamsSchema.safeParse(request.params);
+    const body = packageVersionYankSchema.safeParse(request.body ?? {});
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package version yank request." : body.error.issues[0]?.message ?? "Invalid package version yank payload." };
+    }
+    try {
+      const pkg = await repo.yankPackageVersion(params.data.name, params.data.version, user, body.data.message);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package version yank failed." };
+    }
+  });
+
   app.get("/api/v1/packages/:name", async (request, reply) => {
     const parsed = packageParamsSchema.safeParse(request.params);
     if (!parsed.success) {
@@ -514,7 +684,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid package name." };
     }
     const pkg = await repo.getPackage(parsed.data.name);
-    if (!pkg) {
+    if (!pkg || isDeletedPackage(pkg)) {
       reply.code(404);
       return { package: null, owner: null };
     }
@@ -529,7 +699,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid package version list request." };
     }
     const pkg = await repo.getPackage(params.data.name);
-    if (!pkg) {
+    if (!pkg || isDeletedPackage(pkg)) {
       reply.code(404);
       return { items: [], nextCursor: null };
     }
@@ -543,7 +713,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid package version request." };
     }
     const found = await repo.getPackageVersion(parsed.data.name, parsed.data.version);
-    if (!found) {
+    if (!found || isDeletedPackage(found.pkg)) {
       reply.code(404);
       return { package: null, version: null };
     }
@@ -576,6 +746,11 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       reply.code(400);
       return { error: "Invalid package star state request." };
     }
+    const pkg = await repo.getPackage(parsed.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { starred: false };
+    }
     return { starred: await repo.getPackageStar(parsed.data.name, user.id) };
   });
 
@@ -586,6 +761,11 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     if (!parsed.success) {
       reply.code(400);
       return { error: "Invalid package star request." };
+    }
+    const pkg = await repo.getPackage(parsed.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { package: null, stats: null, starred: false };
     }
     const result = await repo.togglePackageStar(parsed.data.name, user);
     if (!result) {
@@ -606,6 +786,11 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       reply.code(400);
       return { error: "Invalid package comments request." };
     }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { items: [], nextCursor: null };
+    }
     const comments = await repo.listPackageComments(params.data.name, query.data);
     return {
       items: comments.items.map(publicPackageComment),
@@ -625,6 +810,11 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
           ? "Invalid package comments request."
           : body.error.issues[0]?.message ?? "Invalid comment payload.",
       };
+    }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { comment: null };
     }
     const comment = await repo.addPackageComment(params.data.name, user, body.data.body);
     if (!comment) {
@@ -647,6 +837,11 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
           ? "Invalid package report request."
           : body.error.issues[0]?.message ?? "Invalid report payload.",
       };
+    }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { report: null };
     }
     const report = await repo.reportPackage(params.data.name, user, body.data.reason);
     if (!report) {
@@ -735,7 +930,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid skill slug." };
     }
     const pkg = await repo.getPackage(parsed.data.slug);
-    if (!pkg || pkg.family !== "skill") {
+    if (!pkg || isDeletedPackage(pkg) || pkg.family !== "skill") {
       reply.code(404);
       return { skill: null, latestVersion: null, owner: null };
     }
@@ -750,7 +945,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid skill version list request." };
     }
     const pkg = await repo.getPackage(params.data.slug);
-    if (!pkg || pkg.family !== "skill") {
+    if (!pkg || isDeletedPackage(pkg) || pkg.family !== "skill") {
       reply.code(404);
       return { items: [], nextCursor: null };
     }

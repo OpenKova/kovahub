@@ -10,6 +10,7 @@ import {
   type PackageFile,
   type PackageListItem,
   type PackageRecord,
+  type PackageSettingsInput,
   type PackageVerificationSummary,
   type PackageVersionRecord,
   type PreparedPublishPackageInput,
@@ -93,6 +94,7 @@ export type ListPackagesOptions = {
   sort?: "recent" | "popular" | "trending";
   limit?: number;
   cursor?: string;
+  includeDeleted?: boolean;
 };
 
 export type SearchPackagesOptions = {
@@ -128,6 +130,11 @@ export type RegistryRepository = {
   getPackage(name: string): Promise<PackageRecord | null>;
   getPackageVersion(name: string, version: string): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   publishPackage(input: PreparedPublishPackageInput, owner: AuthPrincipal): Promise<PackageRecord>;
+  updatePackageSettings(name: string, user: AuthPrincipal, input: PackageSettingsInput): Promise<PackageRecord | null>;
+  renamePackage(name: string, user: AuthPrincipal, newName: string): Promise<PackageRecord | null>;
+  transferPackage(name: string, user: AuthPrincipal, targetHandle: string): Promise<PackageRecord | null>;
+  setPackageDeleted(name: string, user: AuthPrincipal, deleted: boolean): Promise<PackageRecord | null>;
+  yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null): Promise<PackageRecord | null>;
   getArchive(name: string, selector?: { version?: string; tag?: string }): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   recordDownload(name: string): Promise<void>;
   recordInstall(name: string): Promise<void>;
@@ -230,6 +237,16 @@ function normalizeTopic(value: string) {
 
 export function normalizeTopics(values: string[] = []) {
   return [...new Set(values.map(normalizeTopic).filter(Boolean))];
+}
+
+function assertPackageOwner(pkg: PackageRecord, user: AuthPrincipal) {
+  if (normalizeKey(pkg.ownerHandle ?? "") !== normalizeKey(user.handle)) {
+    throw new Error("Only the package owner can manage this package.");
+  }
+}
+
+function latestActiveVersion(versions: PackageVersionRecord[]) {
+  return versions.find((version) => !version.yankedAt) ?? null;
 }
 
 function discoveryScore(pkg: PackageRecord) {
@@ -570,6 +587,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
     const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
     const filtered = this.sortedPackages(options.sort).filter((pkg) => {
+      if (!options.includeDeleted && pkg.deletedAt) return false;
       if (options.family && pkg.family !== options.family) return false;
       if (options.families?.length && !options.families.includes(pkg.family)) return false;
       if (options.owner && normalizeKey(pkg.ownerHandle ?? "") !== normalizeKey(options.owner)) return false;
@@ -589,6 +607,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
     return this.sortedPackages("trending")
       .filter((pkg) => {
+        if (pkg.deletedAt) return false;
         if (options.family && pkg.family !== options.family) return false;
         if (options.families?.length && !options.families.includes(pkg.family)) return false;
         if (options.owner && normalizeKey(pkg.ownerHandle ?? "") !== normalizeKey(options.owner)) return false;
@@ -673,9 +692,78 @@ export class InMemoryRegistryRepository implements RegistryRepository {
         stars: 0,
         versions: 1,
       },
+      deletedAt: null,
     };
     this.packages.set(key, record);
     return record;
+  }
+
+  async updatePackageSettings(name: string, user: AuthPrincipal, input: PackageSettingsInput) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    assertPackageOwner(pkg, user);
+    if (input.displayName !== undefined) pkg.displayName = input.displayName;
+    if (input.summary !== undefined) pkg.summary = input.summary;
+    if (input.tags !== undefined) pkg.topics = normalizeTopics(input.tags);
+    if (input.channel !== undefined) {
+      pkg.channel = input.channel;
+      pkg.isOfficial = input.channel === "official";
+    }
+    pkg.updatedAt = now();
+    return pkg;
+  }
+
+  async renamePackage(name: string, user: AuthPrincipal, newName: string) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    assertPackageOwner(pkg, user);
+    const oldKey = normalizeKey(pkg.name);
+    const nextKey = normalizeKey(newName);
+    if (oldKey !== nextKey && this.packages.has(nextKey)) throw new Error("Package name is already taken.");
+    this.packages.delete(oldKey);
+    pkg.name = newName;
+    pkg.updatedAt = now();
+    this.packages.set(nextKey, pkg);
+    return pkg;
+  }
+
+  async transferPackage(name: string, user: AuthPrincipal, targetHandle: string) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    assertPackageOwner(pkg, user);
+    const target = await this.findUserByHandle(targetHandle);
+    if (!target) throw new Error("Target publisher does not exist.");
+    pkg.ownerHandle = target.handle;
+    pkg.updatedAt = now();
+    return pkg;
+  }
+
+  async setPackageDeleted(name: string, user: AuthPrincipal, deleted: boolean) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    assertPackageOwner(pkg, user);
+    pkg.deletedAt = deleted ? now() : null;
+    pkg.updatedAt = now();
+    return pkg;
+  }
+
+  async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    assertPackageOwner(pkg, user);
+    const target = pkg.versions.find((candidate) => candidate.version === version);
+    if (!target) return null;
+    target.yankedAt = now();
+    target.yankMessage = message ?? null;
+    target.distTags = target.distTags.filter((tag) => tag !== "latest");
+    if (pkg.latestVersion === target.version) {
+      const nextLatest = latestActiveVersion(pkg.versions);
+      pkg.latestVersion = nextLatest?.version ?? null;
+      pkg.tags = nextLatest ? { ...pkg.tags, latest: nextLatest.version } : {};
+      if (nextLatest && !nextLatest.distTags.includes("latest")) nextLatest.distTags.push("latest");
+    }
+    pkg.updatedAt = now();
+    return pkg;
   }
 
   async getArchive(name: string, selector: { version?: string; tag?: string } = {}) {
@@ -689,6 +777,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     const version = targetVersion
       ? pkg.versions.find((candidate) => candidate.version === targetVersion)
       : pkg.versions[0];
+    if (pkg.deletedAt || version?.yankedAt) return null;
     return version ? { pkg, version } : null;
   }
 
@@ -736,7 +825,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       .filter((entry) => entry.userId === userId)
       .sort((left, right) => right.createdAt - left.createdAt)
       .map((entry) => this.packages.get(normalizeKey(entry.packageName)))
-      .filter((pkg): pkg is PackageRecord => Boolean(pkg));
+      .filter((pkg): pkg is PackageRecord => pkg !== undefined && !pkg.deletedAt);
     const page = starred.slice(offset, offset + limit);
     const nextOffset = offset + page.length;
     return {

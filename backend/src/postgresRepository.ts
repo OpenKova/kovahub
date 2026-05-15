@@ -10,6 +10,7 @@ import {
   type PackageFamily,
   type PackageFile,
   type PackageRecord,
+  type PackageSettingsInput,
   type PackageVerificationSummary,
   type PackageVersionRecord,
   type PreparedPublishPackageInput,
@@ -46,6 +47,7 @@ type PackageRow = QueryResultRow & {
   capabilities: PackageCapabilitySummary | null;
   verification: PackageVerificationSummary | null;
   stats: Partial<PackageRecord["stats"]> | null;
+  deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -60,6 +62,8 @@ type PackageVersionRow = QueryResultRow & {
   compatibility: PackageCompatibility | null;
   capabilities: PackageCapabilitySummary | null;
   verification: PackageVerificationSummary | null;
+  yanked_at: Date | null;
+  yank_message: string | null;
   created_at: Date;
   files: PackageFile[];
 };
@@ -126,6 +130,7 @@ const packageColumns = `
     p.capabilities,
     p.verification,
     p.stats,
+    p.deleted_at,
     p.created_at,
     p.updated_at
 `;
@@ -267,6 +272,7 @@ function rowToPackage(row: PackageRow, versions: PackageVersionRecord[] = []): P
     verificationTier: row.verification?.tier ?? null,
     scanStatus: row.verification?.scanStatus ?? null,
     moderationStatus: row.verification?.moderationStatus ?? null,
+    deletedAt: row.deleted_at ? timeMs(row.deleted_at) : null,
     tags: row.latest_version ? { latest: row.latest_version } : {},
     compatibility: row.compatibility,
     capabilities,
@@ -280,6 +286,8 @@ function rowToVersion(row: PackageVersionRow, archive: Buffer = Buffer.alloc(0))
   return {
     version: row.version,
     createdAt: timeMs(row.created_at),
+    yankedAt: row.yanked_at ? timeMs(row.yanked_at) : null,
+    yankMessage: row.yank_message,
     changelog: row.changelog,
     distTags: row.dist_tags,
     files: row.files,
@@ -541,7 +549,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
     const limit = clampLimit(options.limit, 50);
     const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
     const params: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = options.includeDeleted ? [] : ["p.deleted_at is null"];
 
     if (options.family) where.push(`p.family = ${addParam(params, options.family)}::package_family`);
     if (!options.family && options.families?.length) {
@@ -578,7 +586,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
   async searchPackages(options: SearchPackagesOptions) {
     const limit = clampLimit(options.limit, 20);
     const params: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = ["p.deleted_at is null"];
     let scoreExpression = "1";
 
     if (options.family) where.push(`p.family = ${addParam(params, options.family)}::package_family`);
@@ -791,9 +799,165 @@ export class PostgresRegistryRepository implements RegistryRepository {
     }
   }
 
+  async updatePackageSettings(name: string, user: AuthPrincipal, input: PackageSettingsInput) {
+    const current = await this.getPackage(name);
+    if (!current) return null;
+    const result = await this.pool.query<{ name: string }>(
+      `
+        update packages
+        set
+          display_name = $3,
+          summary = $4,
+          topics = $5,
+          channel = $6::package_channel,
+          is_official = $6 = 'official',
+          updated_at = now()
+        where name = $1 and owner_id = $2
+        returning name
+      `,
+      [
+        normalizeKey(name),
+        user.id,
+        input.displayName ?? current.displayName,
+        input.summary === undefined ? current.summary : input.summary,
+        input.tags === undefined ? (current.topics ?? []) : normalizeTopics(input.tags),
+        input.channel ?? current.channel,
+      ],
+    );
+    if (!result.rows[0]) throw new Error("Only the package owner can manage this package.");
+    return this.getPackage(result.rows[0].name);
+  }
+
+  async renamePackage(name: string, user: AuthPrincipal, newName: string) {
+    const result = await this.pool.query<{ name: string }>(
+      `
+        update packages
+        set name = $3, updated_at = now()
+        where name = $1 and owner_id = $2
+        returning name
+      `,
+      [normalizeKey(name), user.id, normalizeKey(newName)],
+    );
+    if (!result.rows[0]) {
+      const existing = await this.getPackage(name);
+      if (!existing) return null;
+      throw new Error("Only the package owner can manage this package.");
+    }
+    return this.getPackage(result.rows[0].name);
+  }
+
+  async transferPackage(name: string, user: AuthPrincipal, targetHandle: string) {
+    const target = await this.findUserByHandle(targetHandle);
+    if (!target) throw new Error("Target publisher does not exist.");
+    const result = await this.pool.query<{ name: string }>(
+      `
+        update packages
+        set owner_id = $3, updated_at = now()
+        where name = $1 and owner_id = $2
+        returning name
+      `,
+      [normalizeKey(name), user.id, target.id],
+    );
+    if (!result.rows[0]) {
+      const existing = await this.getPackage(name);
+      if (!existing) return null;
+      throw new Error("Only the package owner can manage this package.");
+    }
+    return this.getPackage(result.rows[0].name);
+  }
+
+  async setPackageDeleted(name: string, user: AuthPrincipal, deleted: boolean) {
+    const result = await this.pool.query<{ name: string }>(
+      `
+        update packages
+        set deleted_at = case when $3 then now() else null end, updated_at = now()
+        where name = $1 and owner_id = $2
+        returning name
+      `,
+      [normalizeKey(name), user.id, deleted],
+    );
+    if (!result.rows[0]) {
+      const existing = await this.getPackage(name);
+      if (!existing) return null;
+      throw new Error("Only the package owner can manage this package.");
+    }
+    return this.getPackage(result.rows[0].name);
+  }
+
+  async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {
+    const packageName = normalizeKey(name);
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const pkg = await client.query<{ id: string; latest_version: string | null }>(
+        "select id, latest_version from packages where name = $1 and owner_id = $2 for update",
+        [packageName, user.id],
+      );
+      const row = pkg.rows[0];
+      if (!row) {
+        const existing = await this.getPackage(name);
+        await client.query("rollback");
+        if (!existing) return null;
+        throw new Error("Only the package owner can manage this package.");
+      }
+
+      const yanked = await client.query<{ version: string }>(
+        `
+          update package_versions
+          set yanked_at = now(), yank_message = $3, dist_tags = array_remove(dist_tags, 'latest')
+          where package_id = $1 and version = $2
+          returning version
+        `,
+        [row.id, version, message ?? null],
+      );
+      if (!yanked.rows[0]) {
+        await client.query("rollback");
+        return null;
+      }
+
+      if (row.latest_version === version) {
+        const next = await client.query<{ version: string }>(
+          `
+            select version
+            from package_versions
+            where package_id = $1 and yanked_at is null
+            order by created_at desc
+            limit 1
+          `,
+          [row.id],
+        );
+        const nextVersion = next.rows[0]?.version ?? null;
+        await client.query("update packages set latest_version = $2, updated_at = now() where id = $1", [
+          row.id,
+          nextVersion,
+        ]);
+        if (nextVersion) {
+          await client.query(
+            `
+              update package_versions
+              set dist_tags = case when 'latest' = any(dist_tags) then dist_tags else array_append(dist_tags, 'latest') end
+              where package_id = $1 and version = $2
+            `,
+            [row.id, nextVersion],
+          );
+        }
+      } else {
+        await client.query("update packages set updated_at = now() where id = $1", [row.id]);
+      }
+
+      await client.query("commit");
+      return this.getPackage(packageName);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async getArchive(name: string, selector: { version?: string; tag?: string } = {}) {
     const pkgRow = await this.getPackageRow(name);
-    if (!pkgRow) return null;
+    if (!pkgRow || pkgRow.deleted_at) return null;
 
     const versionRow = await this.getArchiveVersionRow(pkgRow.id, selector, pkgRow.latest_version);
     if (!versionRow) return null;
@@ -904,7 +1068,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
         from packages p
         join users u on u.id = p.owner_id
         join package_stars ps on ps.package_id = p.id
-        where ps.user_id = $1
+        where ps.user_id = $1 and p.deleted_at is null
         order by ps.created_at desc
         limit $2
         offset $3
@@ -1099,6 +1263,8 @@ export class PostgresRegistryRepository implements RegistryRepository {
           pv.compatibility,
           pv.capabilities,
           pv.verification,
+          pv.yanked_at,
+          pv.yank_message,
           pv.created_at,
           coalesce(
             jsonb_agg(
@@ -1146,6 +1312,8 @@ export class PostgresRegistryRepository implements RegistryRepository {
           pv.compatibility,
           pv.capabilities,
           pv.verification,
+          pv.yanked_at,
+          pv.yank_message,
           pv.created_at,
           coalesce(
             jsonb_agg(
@@ -1161,7 +1329,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
           ) as files
         from package_versions pv
         left join package_files pf on pf.package_version_id = pv.id
-        where ${where.join(" and ")}
+        where ${where.join(" and ")} and pv.yanked_at is null
         group by pv.id
         order by pv.created_at desc
         limit 1

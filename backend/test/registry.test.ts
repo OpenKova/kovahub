@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
+import { InMemoryRegistryRepository } from "../src/repository.js";
 import { buildServer } from "../src/server.js";
 import { buildServerWithPackageFixtures } from "./fixtures.js";
 
@@ -514,6 +515,118 @@ describe("registry api", () => {
     expect(body.package.versions[1].distTags).not.toContain("latest");
     expect(body.package.versions[0].sha256hash).toMatch(/^[a-f0-9]{64}$/);
     expect(body.package.versions[0].files.map((file) => file.path)).toContain("package.json");
+    await app.close();
+  });
+
+  it("lets package owners manage settings, versions, deletion, rename, and transfer", async () => {
+    const repo = new InMemoryRegistryRepository();
+    await repo.createUser({
+      handle: "receiver",
+      email: "receiver@example.com",
+      passwordHash: "test",
+    });
+    const app = await buildServer(repo);
+    const token = await signInWithGitHub(app);
+    const payload = {
+      name: "@tester/manage-plugin",
+      displayName: "Manage Plugin",
+      family: "code-plugin",
+      summary: "Owner managed package.",
+      compatibility: {
+        pluginApi: "^1.0.0",
+        minGatewayVersion: "2026.3.0",
+      },
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { ...payload, version: "0.1.0" },
+    });
+    expect(first.statusCode).toBe(201);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { ...payload, version: "0.2.0" },
+    });
+    expect(second.statusCode).toBe(201);
+
+    const settings = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/packages/%40tester%2Fmanage-plugin/settings",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        displayName: "Managed Plugin",
+        summary: "Updated by the owner.",
+        tags: ["owner-tools", "settings"],
+      },
+    });
+    expect(settings.statusCode).toBe(200);
+    expect(settings.json().package).toMatchObject({
+      displayName: "Managed Plugin",
+      summary: "Updated by the owner.",
+      topics: ["owner-tools", "settings"],
+    });
+
+    const yanked = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages/%40tester%2Fmanage-plugin/versions/0.2.0/yank",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { message: "Bad release." },
+    });
+    expect(yanked.statusCode).toBe(200);
+    expect(yanked.json().package.latestVersion).toBe("0.1.0");
+    expect(yanked.json().package.versions.find((version: { version: string }) => version.version === "0.2.0")).toMatchObject({
+      yankedAt: expect.any(Number),
+      yankMessage: "Bad release.",
+    });
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: "/api/v1/packages/%40tester%2Fmanage-plugin",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json().package.deletedAt).toEqual(expect.any(Number));
+    expect((await app.inject("/api/v1/packages/%40tester%2Fmanage-plugin")).statusCode).toBe(404);
+
+    const ownerList = await app.inject({
+      method: "GET",
+      url: "/api/v1/me/packages",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(ownerList.statusCode).toBe(200);
+    expect(ownerList.json().items[0]).toMatchObject({ deletedAt: expect.any(Number) });
+
+    const restored = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages/%40tester%2Fmanage-plugin/restore",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().package.deletedAt).toBeNull();
+
+    const renamed = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages/%40tester%2Fmanage-plugin/rename",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: "@tester/renamed-plugin" },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().package.name).toBe("@tester/renamed-plugin");
+    expect((await app.inject("/api/v1/packages/%40tester%2Fmanage-plugin")).statusCode).toBe(404);
+
+    const transferred = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages/%40tester%2Frenamed-plugin/transfer",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetHandle: "receiver" },
+    });
+    expect(transferred.statusCode).toBe(200);
+    expect(transferred.json().package.ownerHandle).toBe("receiver");
     await app.close();
   });
 

@@ -37,7 +37,9 @@ import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "re
 import {
   clearToken,
   createApiToken,
+  deletePackage,
   fetchMe,
+  fetchOwnerPackages,
   fetchPackageDetail,
   fetchPackageComments,
   fetchPackageStar,
@@ -52,12 +54,17 @@ import {
   postPackageComment,
   publishArchivePackage,
   publishPackage,
+  renamePackage,
   reportPackage,
   revokeApiToken,
+  restorePackage,
   listApiTokens,
   storeToken,
   togglePackageStar,
+  transferPackage,
   updateProfile,
+  updatePackageSettings,
+  yankPackageVersion,
 } from "./api";
 import { kovaRoboLogo } from "./brandAssets";
 import type {
@@ -67,6 +74,7 @@ import type {
   PackageDetail,
   PackageFamily,
   PackageListItem,
+  PackageSettingsPayload,
   PackageSort,
   ProfileUpdatePayload,
   PublishArchiveMetadata,
@@ -1798,6 +1806,150 @@ function DirectoryPackageCard({ item }: { item: PackageListItem }) {
   );
 }
 
+function OwnerPackageCard({
+  item,
+  onChanged,
+}: {
+  item: PackageListItem;
+  onChanged: (item: PackageListItem) => void;
+}) {
+  const [displayName, setDisplayName] = useState(item.displayName);
+  const [summary, setSummary] = useState(item.summary ?? "");
+  const [tags, setTags] = useState((item.topics ?? []).join(", "));
+  const [channel, setChannel] = useState(item.channel);
+  const [nextName, setNextName] = useState(item.name);
+  const [targetHandle, setTargetHandle] = useState("");
+  const [yankMessage, setYankMessage] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDisplayName(item.displayName);
+    setSummary(item.summary ?? "");
+    setTags((item.topics ?? []).join(", "));
+    setChannel(item.channel);
+    setNextName(item.name);
+  }, [item]);
+
+  function applyPackage(result: { package: PackageListItem | null }) {
+    if (!result.package) throw new Error("Package update returned no package.");
+    onChanged(result.package);
+  }
+
+  async function runAction(action: () => Promise<{ package: PackageListItem | null }>, message: string) {
+    setStatus(null);
+    setError(null);
+    try {
+      applyPackage(await action());
+      setStatus(message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Package action failed.");
+    }
+  }
+
+  async function saveSettings(event: FormEvent) {
+    event.preventDefault();
+    const payload: PackageSettingsPayload = {
+      displayName,
+      summary: summary.trim() ? summary : null,
+      tags: parseTags(tags),
+      channel,
+    };
+    await runAction(() => updatePackageSettings(item.name, payload), "Package settings saved.");
+  }
+
+  const latestVersion = item.latestVersion;
+
+  return (
+    <article className={`owner-package-card${item.deletedAt ? " is-deleted" : ""}`}>
+      <div className="owner-package-card-head">
+        <div>
+          <h3>{item.displayName}</h3>
+          <span>{item.name}</span>
+        </div>
+        <div className="owner-package-actions">
+          <Link to={packageRoute(item.name)}>View</Link>
+          {item.deletedAt ? (
+            <button type="button" onClick={() => void runAction(() => restorePackage(item.name), "Package restored.")}>
+              Restore
+            </button>
+          ) : (
+            <button type="button" onClick={() => void runAction(() => deletePackage(item.name), "Package deleted.")}>
+              Delete
+            </button>
+          )}
+        </div>
+      </div>
+
+      <form className="owner-package-form" onSubmit={saveSettings}>
+        <label>
+          Display name
+          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        </label>
+        <label>
+          Summary
+          <input value={summary} onChange={(event) => setSummary(event.target.value)} />
+        </label>
+        <label>
+          Tags
+          <input value={tags} onChange={(event) => setTags(event.target.value)} />
+        </label>
+        <label>
+          Channel
+          <select value={channel} onChange={(event) => setChannel(event.target.value as PackageListItem["channel"])}>
+            <option value="community">Community</option>
+            <option value="private">Private</option>
+            <option value="official">Official</option>
+          </select>
+        </label>
+        <button className="primary-action" type="submit">
+          Save settings
+        </button>
+      </form>
+
+      <div className="owner-package-tools">
+        <label>
+          Rename
+          <span>
+            <input value={nextName} onChange={(event) => setNextName(event.target.value)} />
+            <button type="button" onClick={() => void runAction(() => renamePackage(item.name, nextName), "Package renamed.")}>
+              Rename
+            </button>
+          </span>
+        </label>
+        <label>
+          Transfer
+          <span>
+            <input placeholder="target-publisher" value={targetHandle} onChange={(event) => setTargetHandle(event.target.value)} />
+            <button
+              type="button"
+              disabled={!targetHandle.trim()}
+              onClick={() => void runAction(() => transferPackage(item.name, targetHandle), "Package transferred.")}
+            >
+              Transfer
+            </button>
+          </span>
+        </label>
+        <label>
+          Yank latest version
+          <span>
+            <input placeholder={latestVersion ? `Reason for ${latestVersion}` : "No version"} value={yankMessage} onChange={(event) => setYankMessage(event.target.value)} />
+            <button
+              type="button"
+              disabled={!latestVersion}
+              onClick={() => void runAction(() => yankPackageVersion(item.name, latestVersion ?? "", yankMessage || null), "Version yanked.")}
+            >
+              Yank
+            </button>
+          </span>
+        </label>
+      </div>
+      {status ? <p className="form-success">{status}</p> : null}
+      {error ? <p className="form-error">{error}</p> : null}
+    </article>
+  );
+}
+
 function DirectoryPage({ kind, theme }: { kind: "skills" | "plugins"; theme: ThemeSettings }) {
   const { packages, loading, error } = usePackageCatalog();
   const isSkills = kind === "skills";
@@ -2543,7 +2695,7 @@ function DashboardPage({ theme }: { theme: ThemeSettings }) {
     let active = true;
     setLoading(true);
     setError(null);
-    fetchPackages({ owner: user.handle, limit: 100 })
+    fetchOwnerPackages({ limit: 100 })
       .then((page) => {
         if (active) setItems(page.items);
       })
@@ -2630,7 +2782,11 @@ function DashboardPage({ theme }: { theme: ThemeSettings }) {
         {!loading && items.length === 0 ? <p className="content-muted">No packages published yet.</p> : null}
         <div className="directory-grid">
           {items.map((item) => (
-            <DirectoryPackageCard item={item} key={item.name} />
+            <OwnerPackageCard
+              item={item}
+              key={item.name}
+              onChanged={(updated) => setItems((current) => current.map((candidate) => (candidate.name === item.name ? updated : candidate)))}
+            />
           ))}
         </div>
       </section>

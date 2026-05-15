@@ -5,6 +5,7 @@ import type {
   PackageDetail,
   PackageFamily,
   PackageListItem,
+  PackageSettingsPayload,
   PackageSort,
   PackageStarState,
   PackageStarToggleResult,
@@ -101,6 +102,13 @@ export async function fetchStarredPackages(params: { cursor?: string | null; lim
   return request<{ items: PackageListItem[]; nextCursor: string | null }>(`/api/v1/stars?${query.toString()}`);
 }
 
+export async function fetchOwnerPackages(params: { cursor?: string | null; limit?: number } = {}) {
+  const query = new URLSearchParams();
+  if (params.cursor) query.set("cursor", params.cursor);
+  query.set("limit", String(params.limit ?? 100));
+  return request<{ items: PackageListItem[]; nextCursor: string | null }>(`/api/v1/me/packages?${query.toString()}`);
+}
+
 export async function fetchPackageStar(name: string) {
   return request<PackageStarState>(`/api/v1/packages/${encodeURIComponent(name)}/star`);
 }
@@ -159,6 +167,49 @@ export async function publishArchivePackage(file: File, metadata: PublishArchive
     method: "POST",
     body: form,
   });
+}
+
+export async function updatePackageSettings(name: string, payload: PackageSettingsPayload) {
+  return request<PackageDetail>(`/api/v1/packages/${encodeURIComponent(name)}/settings`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function renamePackage(name: string, nextName: string) {
+  return request<PackageDetail>(`/api/v1/packages/${encodeURIComponent(name)}/rename`, {
+    method: "POST",
+    body: JSON.stringify({ name: nextName }),
+  });
+}
+
+export async function transferPackage(name: string, targetHandle: string) {
+  return request<PackageDetail>(`/api/v1/packages/${encodeURIComponent(name)}/transfer`, {
+    method: "POST",
+    body: JSON.stringify({ targetHandle }),
+  });
+}
+
+export async function deletePackage(name: string) {
+  return request<PackageDetail>(`/api/v1/packages/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function restorePackage(name: string) {
+  return request<PackageDetail>(`/api/v1/packages/${encodeURIComponent(name)}/restore`, {
+    method: "POST",
+  });
+}
+
+export async function yankPackageVersion(name: string, version: string, message?: string | null) {
+  return request<PackageDetail>(
+    `/api/v1/packages/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}/yank`,
+    {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    },
+  );
 }
 
 export async function fetchMe() {

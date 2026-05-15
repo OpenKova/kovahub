@@ -77,12 +77,15 @@ export type PackageListItem = {
   verificationTier?: string | null;
   scanStatus?: PackageVerificationSummary["scanStatus"] | null;
   moderationStatus?: PackageVerificationSummary["moderationStatus"] | null;
+  deletedAt?: number | null;
   stats?: PackageStats;
 };
 
 export type PackageVersionRecord = {
   version: string;
   createdAt: number;
+  yankedAt?: number | null;
+  yankMessage?: string | null;
   changelog: string;
   distTags: string[];
   files: PackageFile[];
@@ -176,6 +179,13 @@ export type PreparedPublishPackageInput = PublishPackageInput & {
   archiveFiles?: PackageFile[];
 };
 
+export type PackageSettingsInput = {
+  displayName?: string;
+  summary?: string | null;
+  tags?: string[];
+  channel?: PackageChannel;
+};
+
 export function normalizeCompatibility(
   input: PublishPackageInput["compatibility"],
 ): PackageCompatibility | null {
@@ -210,6 +220,7 @@ export function toPackageListItem(record: PackageRecord): PackageListItem {
     verificationTier: record.verificationTier,
     scanStatus: record.verification?.scanStatus ?? null,
     moderationStatus: record.verification?.moderationStatus ?? null,
+    deletedAt: record.deletedAt ?? null,
     stats: record.stats,
   };
 }

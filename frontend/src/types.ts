@@ -51,6 +51,8 @@ export type PackageStats = {
 export type PackageVersionSummary = {
   version: string;
   createdAt: number;
+  yankedAt?: number | null;
+  yankMessage?: string | null;
   changelog: string;
   distTags: string[];
   files: PackageFile[];
@@ -78,6 +80,7 @@ export type PackageListItem = {
   verificationTier?: string | null;
   scanStatus?: PackageVerification["scanStatus"] | null;
   moderationStatus?: PackageVerification["moderationStatus"] | null;
+  deletedAt?: number | null;
   stats?: PackageStats;
 };
 
@@ -199,4 +202,11 @@ export type PublishArchiveMetadata = {
     pluginApi?: string;
     minGatewayVersion?: string;
   };
+};
+
+export type PackageSettingsPayload = {
+  displayName?: string;
+  summary?: string | null;
+  tags?: string[];
+  channel?: PackageChannel;
 };
