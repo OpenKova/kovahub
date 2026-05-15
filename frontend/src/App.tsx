@@ -1,6 +1,7 @@
 import {
   ArrowDownToLine,
   ArrowRight,
+  BookOpen,
   Boxes,
   CheckCircle2,
   Code2,
@@ -24,7 +25,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   clearToken,
@@ -66,6 +67,99 @@ const familyIcons: Record<PackageFamily, typeof Sparkles> = {
 };
 
 const skillSlugPattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
+const themeStorageKey = "kovahub.theme";
+
+type ThemeMode = "system" | "light" | "dark";
+type ResolvedTheme = "light" | "dark";
+type ThemeSettings = {
+  mode: ThemeMode;
+  resolved: ResolvedTheme;
+  setMode: (mode: ThemeMode) => void;
+};
+
+function readStoredThemeMode(): ThemeMode {
+  if (typeof window === "undefined") return "system";
+  const stored = window.localStorage.getItem(themeStorageKey);
+  return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+}
+
+function prefersDarkScheme() {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function useThemeSettings(): ThemeSettings {
+  const [mode, setMode] = useState<ThemeMode>(() => readStoredThemeMode());
+  const [systemDark, setSystemDark] = useState(() => prefersDarkScheme());
+  const resolved: ResolvedTheme = mode === "system" ? (systemDark ? "dark" : "light") : mode;
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateSystemTheme = () => setSystemDark(media.matches);
+    updateSystemTheme();
+    media.addEventListener("change", updateSystemTheme);
+    return () => media.removeEventListener("change", updateSystemTheme);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(themeStorageKey, mode);
+  }, [mode]);
+
+  useEffect(() => {
+    document.documentElement.dataset.kovahubTheme = resolved;
+    document.documentElement.style.colorScheme = resolved;
+  }, [resolved]);
+
+  return { mode, resolved, setMode };
+}
+
+function useLandingUser() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    if (!getStoredToken()) return;
+    let active = true;
+    fetchMe()
+      .then((result) => {
+        if (active) setUser(result.user);
+      })
+      .catch(() => {
+        clearToken();
+        if (active) setUser(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return { user, setUser };
+}
+
+function usePackageCatalog() {
+  const [packages, setPackages] = useState<PackageListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchPackages({})
+      .then((page) => {
+        if (active) setPackages(page.items);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load packages.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return { packages, loading, error };
+}
 
 function optionalText(value: string) {
   const trimmed = value.trim();
@@ -785,10 +879,12 @@ function LandingHeader({
   user,
   onSignOut,
   onSearch,
+  theme,
 }: {
   user: AuthUser | null;
   onSignOut: () => void;
   onSearch: (query: string) => void;
+  theme: ThemeSettings;
 }) {
   const [navQuery, setNavQuery] = useState("");
   const returnTo = `${window.location.pathname}${window.location.search}`;
@@ -819,13 +915,31 @@ function LandingHeader({
 
         <div className="home-nav-actions">
           <div className="home-theme-toggle" aria-label="Theme mode">
-            <button type="button" aria-label="System theme">
+            <button
+              type="button"
+              className={theme.mode === "system" ? "is-active" : ""}
+              aria-label="System theme"
+              aria-pressed={theme.mode === "system"}
+              onClick={() => theme.setMode("system")}
+            >
               <Monitor size={15} aria-hidden="true" />
             </button>
-            <button type="button" aria-label="Light theme">
+            <button
+              type="button"
+              className={theme.mode === "light" ? "is-active" : ""}
+              aria-label="Light theme"
+              aria-pressed={theme.mode === "light"}
+              onClick={() => theme.setMode("light")}
+            >
               <Sun size={15} aria-hidden="true" />
             </button>
-            <button type="button" aria-label="Dark theme">
+            <button
+              type="button"
+              className={theme.mode === "dark" ? "is-active" : ""}
+              aria-label="Dark theme"
+              aria-pressed={theme.mode === "dark"}
+              onClick={() => theme.setMode("dark")}
+            >
               <Moon size={15} aria-hidden="true" />
             </button>
           </div>
@@ -847,16 +961,16 @@ function LandingHeader({
       </div>
 
       <nav className="home-nav-secondary" aria-label="Marketplace sections">
-        <Link to={marketplaceRoute({ family: "skill" })}>
+        <Link to="/skills">
           <Sparkles size={14} aria-hidden="true" />
           Skills
         </Link>
-        <Link to={marketplaceRoute({ family: "code-plugin" })}>
+        <Link to="/plugins">
           <Plug size={14} aria-hidden="true" />
           Plugins
         </Link>
-        <Link to="/publish">Publishers</Link>
-        <a href={`${getApiBase()}/api/v1/meta`}>Docs</a>
+        <Link to="/publishers">Publishers</Link>
+        <Link to="/docs">Docs</Link>
       </nav>
     </header>
   );
@@ -897,21 +1011,10 @@ function HomePackageCard({ item }: { item: PackageListItem }) {
   );
 }
 
-function HomeLanding() {
+function HomeLanding({ theme }: { theme: ThemeSettings }) {
   const navigate = useNavigate();
-  const [packages, setPackages] = useState<PackageListItem[]>([]);
-  const [user, setUser] = useState<AuthUser | null>(null);
-
-  useEffect(() => {
-    fetchPackages({}).then((page) => setPackages(page.items)).catch(() => setPackages([]));
-  }, []);
-
-  useEffect(() => {
-    if (!getStoredToken()) return;
-    fetchMe()
-      .then((result) => setUser(result.user))
-      .catch(() => clearToken());
-  }, []);
+  const { packages } = usePackageCatalog();
+  const { user, setUser } = useLandingUser();
 
   const featured = packages.slice(0, 6);
   const pluginCount = packages.filter((item) => item.family !== "skill").length;
@@ -928,7 +1031,7 @@ function HomeLanding() {
   }
 
   return (
-    <div className="home-page">
+    <div className="home-page" data-theme={theme.resolved}>
       <LandingHeader
         user={user}
         onSignOut={() => {
@@ -936,6 +1039,7 @@ function HomeLanding() {
           setUser(null);
         }}
         onSearch={runSearch}
+        theme={theme}
       />
 
       <main className="home-v2-main">
@@ -1011,7 +1115,7 @@ function HomeLanding() {
 
         <section className="home-v2-categories">
           <div className="home-v2-categories-grid">
-            <Link to={marketplaceRoute({ family: "skill" })} className="home-v2-cat-item">
+            <Link to="/skills" className="home-v2-cat-item">
               <div className="home-v2-cat-icon">
                 <Sparkles size={20} aria-hidden="true" />
               </div>
@@ -1023,7 +1127,7 @@ function HomeLanding() {
                 <ArrowRight size={16} aria-hidden="true" />
               </span>
             </Link>
-            <Link to={marketplaceRoute({ family: "code-plugin" })} className="home-v2-cat-item">
+            <Link to="/plugins" className="home-v2-cat-item">
               <div className="home-v2-cat-icon">
                 <Code2 size={20} aria-hidden="true" />
               </div>
@@ -1035,7 +1139,7 @@ function HomeLanding() {
                 <ArrowRight size={16} aria-hidden="true" />
               </span>
             </Link>
-            <Link to="/publish" className="home-v2-cat-item">
+            <Link to="/publishers" className="home-v2-cat-item">
               <div className="home-v2-cat-icon">
                 <Users size={20} aria-hidden="true" />
               </div>
@@ -1073,6 +1177,216 @@ function HomeLanding() {
         </div>
       </main>
     </div>
+  );
+}
+
+function LandingPageShell({ theme, children }: { theme: ThemeSettings; children: ReactNode }) {
+  const navigate = useNavigate();
+  const { user, setUser } = useLandingUser();
+
+  return (
+    <div className="home-page" data-theme={theme.resolved}>
+      <LandingHeader
+        user={user}
+        onSignOut={() => {
+          clearToken();
+          setUser(null);
+        }}
+        onSearch={(query) => navigate(marketplaceRoute({ q: query }))}
+        theme={theme}
+      />
+      <main className="content-page-shell">{children}</main>
+    </div>
+  );
+}
+
+function DirectoryPackageCard({ item }: { item: PackageListItem }) {
+  const Icon = familyIcons[item.family];
+
+  return (
+    <Link to={packageRoute(item.name)} className="directory-card">
+      <div className="directory-card-head">
+        <span className="directory-card-icon">
+          <Icon size={18} aria-hidden="true" />
+        </span>
+        <div>
+          <h3>{item.displayName}</h3>
+          <p>{item.ownerHandle ? `@${item.ownerHandle}` : "Kova publisher"}</p>
+        </div>
+      </div>
+      <p className="directory-card-summary">{item.summary ?? "Kova-compatible package."}</p>
+      <div className="directory-card-meta">
+        <span>{familyLabels[item.family]}</span>
+        {item.latestVersion ? <span>v{item.latestVersion}</span> : null}
+        <span>{formatDate(item.updatedAt)}</span>
+      </div>
+    </Link>
+  );
+}
+
+function DirectoryPage({ kind, theme }: { kind: "skills" | "plugins"; theme: ThemeSettings }) {
+  const { packages, loading, error } = usePackageCatalog();
+  const isSkills = kind === "skills";
+  const items = packages.filter((item) => (isSkills ? item.family === "skill" : item.family !== "skill"));
+  const title = isSkills ? "KovaHub Skills" : "KovaHub Plugins";
+  const label = isSkills ? "SKILL DIRECTORY" : "PLUGIN DIRECTORY";
+  const description = isSkills
+    ? "Agent-ready skills published for Kova workflows, research, release work, and automation."
+    : "Gateway-ready code and bundle plugins with compatibility metadata for Kova deployments.";
+  const actionTarget = marketplaceRoute({ family: isSkills ? "skill" : "code-plugin" });
+
+  return (
+    <LandingPageShell theme={theme}>
+      <section className="content-hero">
+        <p>{label}</p>
+        <h1>{title}</h1>
+        <span>{description}</span>
+        <div className="content-actions">
+          <Link className="content-primary-action" to={actionTarget}>
+            Browse marketplace <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+          <Link className="content-secondary-action" to="/publish">
+            Publish package
+          </Link>
+        </div>
+      </section>
+
+      <section className="content-section">
+        <div className="content-section-head">
+          <h2>{isSkills ? "Latest skills" : "Latest plugins"}</h2>
+          <span>{items.length} listed</span>
+        </div>
+        {loading ? <p className="content-muted">Loading packages...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        {!loading && items.length === 0 ? <p className="content-muted">No packages published yet.</p> : null}
+        <div className="directory-grid">
+          {items.map((item) => (
+            <DirectoryPackageCard item={item} key={item.name} />
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
+function PublishersPage({ theme }: { theme: ThemeSettings }) {
+  const { packages, loading, error } = usePackageCatalog();
+  const publishers = useMemo(() => {
+    const byHandle = new Map<
+      string,
+      { handle: string; packages: number; skills: number; plugins: number; latest: number }
+    >();
+
+    packages.forEach((item) => {
+      const handle = item.ownerHandle ?? "openkova";
+      const current = byHandle.get(handle) ?? {
+        handle,
+        packages: 0,
+        skills: 0,
+        plugins: 0,
+        latest: 0,
+      };
+      current.packages += 1;
+      if (item.family === "skill") current.skills += 1;
+      else current.plugins += 1;
+      current.latest = Math.max(current.latest, item.updatedAt);
+      byHandle.set(handle, current);
+    });
+
+    return Array.from(byHandle.values()).sort((a, b) => b.latest - a.latest);
+  }, [packages]);
+
+  return (
+    <LandingPageShell theme={theme}>
+      <section className="content-hero">
+        <p>PUBLISHERS</p>
+        <h1>Kova builders and teams</h1>
+        <span>Discover the people and organizations publishing Kova-compatible packages.</span>
+        <div className="content-actions">
+          <Link className="content-primary-action" to="/publish">
+            Publish with GitHub <Github size={16} aria-hidden="true" />
+          </Link>
+          <Link className="content-secondary-action" to="/marketplace">
+            Browse packages
+          </Link>
+        </div>
+      </section>
+
+      <section className="content-section">
+        <div className="content-section-head">
+          <h2>Publisher index</h2>
+          <span>{publishers.length} active</span>
+        </div>
+        {loading ? <p className="content-muted">Loading publishers...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        {!loading && publishers.length === 0 ? <p className="content-muted">No publishers yet.</p> : null}
+        <div className="publisher-grid">
+          {publishers.map((publisher) => (
+            <Link
+              className="publisher-card"
+              to={marketplaceRoute({ q: publisher.handle })}
+              key={publisher.handle}
+            >
+              <span className="publisher-avatar">
+                <Users size={19} aria-hidden="true" />
+              </span>
+              <div>
+                <h3>@{publisher.handle}</h3>
+                <p>
+                  {publisher.packages} packages · {publisher.plugins} plugins · {publisher.skills} skills
+                </p>
+              </div>
+              <ArrowRight size={16} aria-hidden="true" />
+            </Link>
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
+function DocsPage({ theme }: { theme: ThemeSettings }) {
+  const siteUrl = typeof window === "undefined" ? "" : window.location.origin;
+
+  return (
+    <LandingPageShell theme={theme}>
+      <section className="content-hero">
+        <p>DOCS</p>
+        <h1>KovaHub registry docs</h1>
+        <span>Registry targets, package contracts, and compatibility fields for Kova clients.</span>
+        <div className="content-actions">
+          <a className="content-primary-action" href={`${getApiBase()}/api/v1/meta`}>
+            Open API metadata <BookOpen size={16} aria-hidden="true" />
+          </a>
+          <Link className="content-secondary-action" to="/publish">
+            Publish package
+          </Link>
+        </div>
+      </section>
+
+      <section className="docs-grid">
+        <article className="docs-card">
+          <KeyRound size={19} aria-hidden="true" />
+          <h2>Environment targets</h2>
+          <code>KOVAHUB_REGISTRY={getApiBase()}</code>
+          <code>KOVAHUB_SITE={siteUrl || "http://localhost:5173"}</code>
+        </article>
+        <article className="docs-card">
+          <ShieldCheck size={19} aria-hidden="true" />
+          <h2>Compatibility metadata</h2>
+          <p>Plugin packages must include compatible API and gateway fields.</p>
+          <code>pluginApi</code>
+          <code>minGatewayVersion</code>
+        </article>
+        <article className="docs-card">
+          <Package size={19} aria-hidden="true" />
+          <h2>Registry endpoints</h2>
+          <code>GET /api/v1/packages</code>
+          <code>GET /api/v1/packages/:name/download</code>
+          <code>GET /.well-known/kovahub.json</code>
+        </article>
+      </section>
+    </LandingPageShell>
   );
 }
 
@@ -1231,9 +1545,15 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
 }
 
 export default function App() {
+  const theme = useThemeSettings();
+
   return (
     <Routes>
-      <Route path="/" element={<HomeLanding />} />
+      <Route path="/" element={<HomeLanding theme={theme} />} />
+      <Route path="/skills" element={<DirectoryPage kind="skills" theme={theme} />} />
+      <Route path="/plugins" element={<DirectoryPage kind="plugins" theme={theme} />} />
+      <Route path="/publishers" element={<PublishersPage theme={theme} />} />
+      <Route path="/docs" element={<DocsPage theme={theme} />} />
       <Route path="/marketplace" element={<Marketplace />} />
       <Route path="/packages/*" element={<Marketplace />} />
       <Route path="/publish" element={<Marketplace publishMode />} />
