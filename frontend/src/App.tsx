@@ -5,6 +5,7 @@ import {
   Code2,
   Copy,
   FileArchive,
+  History,
   KeyRound,
   Package,
   Plug,
@@ -175,6 +176,7 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
   const compatibility = pkg.compatibility;
   const capabilities = pkg.capabilities;
   const tags = Object.entries(pkg.tags ?? {});
+  const versions = pkg.versions ?? [];
 
   return (
     <section className="detail-panel">
@@ -206,6 +208,41 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
         <div>
           <span className="stat-label">Versions</span>
           <strong>{pkg.stats?.versions ?? (pkg.latestVersion ? 1 : 0)}</strong>
+        </div>
+      </div>
+
+      <div className="info-section">
+        <h2>
+          <History size={17} aria-hidden="true" />
+          Version History
+        </h2>
+        <div className="version-list">
+          {versions.length === 0 ? <p className="muted">No published versions yet.</p> : null}
+          {versions.map((version) => {
+            const isLatest = version.distTags.includes("latest");
+            return (
+              <div className="version-row" key={version.version}>
+                <div className="version-main">
+                  <div className="version-title">
+                    <strong>v{version.version}</strong>
+                    {isLatest ? <span className="tag latest-tag">latest</span> : null}
+                  </div>
+                  <span className="version-meta">
+                    {formatDate(version.createdAt)} · {version.files.length} files
+                  </span>
+                  {version.changelog ? <p>{version.changelog}</p> : null}
+                  <code className="version-digest">{version.sha256hash.slice(0, 16)}</code>
+                </div>
+                <a
+                  className="icon-action"
+                  href={packageDownloadUrl(pkg.name, version.version)}
+                  aria-label={`Download ${pkg.name} ${version.version}`}
+                >
+                  <ArrowDownToLine size={16} aria-hidden="true" />
+                </a>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -681,23 +718,23 @@ function PublishPanel({
             <input value={archiveTags} onChange={(event) => setArchiveTags(event.target.value)} />
           </label>
           <div className="form-grid">
-          <label>
-            pluginApi
-            <input
-              placeholder="Inferred from kova.compat"
-              value={archivePluginApi}
-              onChange={(event) => setArchivePluginApi(event.target.value)}
-            />
-          </label>
-          <label>
-            minGatewayVersion
-            <input
-              placeholder="Inferred from kova.compat"
-              value={archiveMinGatewayVersion}
-              onChange={(event) => setArchiveMinGatewayVersion(event.target.value)}
-            />
-          </label>
-        </div>
+            <label>
+              pluginApi
+              <input
+                placeholder="Inferred from kova.compat"
+                value={archivePluginApi}
+                onChange={(event) => setArchivePluginApi(event.target.value)}
+              />
+            </label>
+            <label>
+              minGatewayVersion
+              <input
+                placeholder="Inferred from kova.compat"
+                value={archiveMinGatewayVersion}
+                onChange={(event) => setArchiveMinGatewayVersion(event.target.value)}
+              />
+            </label>
+          </div>
         </>
       )}
       {status ? <p className="form-success">{status}</p> : null}

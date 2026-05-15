@@ -152,6 +152,72 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("returns package version history with a single latest tag", async () => {
+    const app = await buildServer();
+    const token = await registerAndLogin(app);
+    const basePayload = {
+      name: "@tester/versioned-plugin",
+      displayName: "Versioned Plugin",
+      family: "code-plugin",
+      summary: "Package with multiple versions.",
+      compatibility: {
+        pluginApi: "^1.0.0",
+        minGatewayVersion: "2026.3.0",
+      },
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        ...basePayload,
+        version: "0.1.0",
+        changelog: "Initial version.",
+      },
+    });
+    expect(first.statusCode).toBe(201);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        ...basePayload,
+        version: "0.2.0",
+        changelog: "Adds registry metadata.",
+      },
+    });
+    expect(second.statusCode).toBe(201);
+
+    const detail = await app.inject("/api/v1/packages/%40tester%2Fversioned-plugin");
+    expect(detail.statusCode).toBe(200);
+    const body = detail.json<{
+      package: {
+        latestVersion: string;
+        stats: { versions: number };
+        versions: Array<{
+          version: string;
+          changelog: string;
+          distTags: string[];
+          sha256hash: string;
+          files: Array<{ path: string }>;
+        }>;
+      };
+    }>();
+    expect(body.package.latestVersion).toBe("0.2.0");
+    expect(body.package.stats.versions).toBe(2);
+    expect(body.package.versions.map((version) => version.version)).toEqual(["0.2.0", "0.1.0"]);
+    expect(body.package.versions[0]).toMatchObject({
+      changelog: "Adds registry metadata.",
+      distTags: ["latest"],
+    });
+    expect(body.package.versions[1].distTags).not.toContain("latest");
+    expect(body.package.versions[0].sha256hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(body.package.versions[0].files.map((file) => file.path)).toContain("package.json");
+    await app.close();
+  });
+
   it("rejects plugin publishes without compatibility metadata", async () => {
     const app = await buildServer();
     const token = await registerAndLogin(app);

@@ -21,6 +21,24 @@ export type PackageCapabilities = {
   hostTargets?: string[];
 };
 
+export type PackageFile = {
+  path: string;
+  size: number;
+  sha256: string;
+  contentType?: string;
+};
+
+export type PackageVersionSummary = {
+  version: string;
+  createdAt: number;
+  changelog: string;
+  distTags: string[];
+  files: PackageFile[];
+  sha256hash: string;
+  compatibility?: PackageCompatibility | null;
+  capabilities?: PackageCapabilities | null;
+};
+
 export type PackageListItem = {
   name: string;
   displayName: string;
@@ -44,6 +62,7 @@ export type PackageDetail = {
         tags?: Record<string, string>;
         compatibility?: PackageCompatibility | null;
         capabilities?: PackageCapabilities | null;
+        versions?: PackageVersionSummary[];
         stats?: {
           downloads: number;
           installs: number;

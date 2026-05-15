@@ -488,6 +488,8 @@ code {
 
 .info-section h2,
 .section-title {
+  display: flex;
+  align-items: center;
   gap: 9px;
 }
 
@@ -645,7 +647,8 @@ label textarea {
 
 .token-secret-box,
 .token-list-heading,
-.token-row {
+.token-row,
+.version-row {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
@@ -653,7 +656,8 @@ label textarea {
 
 .token-secret-box,
 .token-list-heading,
-.token-row {
+.token-row,
+.version-title {
   display: flex;
   align-items: center;
 }
@@ -736,6 +740,77 @@ label textarea {
 .token-row span {
   color: var(--ink-soft);
   font-size: 12px;
+}
+
+.version-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.version-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+}
+
+.version-main {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.version-title {
+  gap: 8px;
+  min-width: 0;
+}
+
+.version-title strong {
+  overflow: hidden;
+  color: #fff;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-meta,
+.version-row p {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.version-row p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.version-digest {
+  color: #d8d8d8;
+  font-size: 11px;
+}
+
+.latest-tag {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.1);
+  color: #bbf7d0;
+}
+
+.icon-action {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: #fff;
+}
+
+.icon-action:hover {
+  border-color: rgba(239, 68, 68, 0.72);
+  filter: brightness(1.08);
 }
 
 .form-error,

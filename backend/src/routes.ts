@@ -44,6 +44,7 @@ function publicPackageDetail(pkg: PackageRecord) {
       compatibility: pkg.compatibility ?? null,
       capabilities: pkg.capabilities ?? null,
       verification: pkg.verification ?? null,
+      versions: pkg.versions.map(publicVersionSummary),
       stats: pkg.stats,
     },
     owner: {
@@ -51,6 +52,20 @@ function publicPackageDetail(pkg: PackageRecord) {
       displayName: pkg.ownerHandle ?? null,
       image: null,
     },
+  };
+}
+
+function publicVersionSummary(version: PackageVersionRecord) {
+  return {
+    version: version.version,
+    createdAt: version.createdAt,
+    changelog: version.changelog,
+    distTags: version.distTags,
+    files: version.files,
+    compatibility: version.compatibility ?? null,
+    capabilities: version.capabilities ?? null,
+    verification: version.verification ?? null,
+    sha256hash: version.sha256hash,
   };
 }
 
@@ -62,15 +77,7 @@ function publicVersionDetail(pkg: PackageRecord, version: PackageVersionRecord) 
       family: pkg.family,
     },
     version: {
-      version: version.version,
-      createdAt: version.createdAt,
-      changelog: version.changelog,
-      distTags: version.distTags,
-      files: version.files,
-      compatibility: version.compatibility ?? null,
-      capabilities: version.capabilities ?? null,
-      verification: version.verification ?? null,
-      sha256hash: version.sha256hash,
+      ...publicVersionSummary(version),
     },
   };
 }
