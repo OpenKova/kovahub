@@ -243,6 +243,42 @@ describe("registry api", () => {
     }
   });
 
+  it("serves API docs, search suggestions, and security headers", async () => {
+    const app = await buildServerWithPackageFixtures();
+    try {
+      const health = await app.inject("/healthz");
+      expect(health.statusCode).toBe(200);
+      expect(health.headers["x-content-type-options"]).toBe("nosniff");
+      expect(health.headers["x-frame-options"]).toBe("DENY");
+
+      const docs = await app.inject("/openapi.json");
+      expect(docs.statusCode).toBe(200);
+      expect(docs.json()).toMatchObject({
+        openapi: "3.1.0",
+        info: { title: "KovaHub Registry API" },
+        paths: {
+          "/api/v1/packages": expect.any(Object),
+          "/api/v1/search/suggestions": expect.any(Object),
+        },
+      });
+
+      const suggestions = await app.inject("/api/v1/search/suggestions?q=context");
+      expect(suggestions.statusCode).toBe(200);
+      expect(suggestions.json()).toMatchObject({
+        packages: [
+          expect.objectContaining({
+            name: "@openkova/context-bridge",
+            ownerHandle: "openkova",
+          }),
+        ],
+        tags: expect.arrayContaining([expect.objectContaining({ tag: "context", count: 1 })]),
+        publishers: expect.arrayContaining([expect.objectContaining({ handle: "openkova", count: 1 })]),
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("serves KovaHub-compatible package search and detail responses", async () => {
     const app = await buildServerWithPackageFixtures();
     const search = await app.inject("/api/v1/packages/search?q=context");

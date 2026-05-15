@@ -36,6 +36,13 @@ export async function buildServer(repo?: RegistryRepository) {
     },
   });
 
+  app.addHook("onRequest", async (_request, reply) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "no-referrer");
+    reply.header("permissions-policy", "camera=(), microphone=(), geolocation=()");
+  });
+
   await registerAuthRoutes(app, activeRepo);
   await registerRegistryRoutes(app, activeRepo);
 

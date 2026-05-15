@@ -2,13 +2,14 @@
 
 KovaHub is a fresh Kova-compatible marketplace for publishing and installing plugins, bundle plugins, and skills.
 
-The MVP scaffold is intentionally small: a TypeScript backend exposes KovaHub registry routes, a React/Vite frontend provides the marketplace UI, and `database/` contains the Postgres schema used by the persistent backend mode.
+The MVP scaffold is intentionally small: a TypeScript backend exposes KovaHub registry routes, a React/Vite frontend provides the marketplace UI, a first-party CLI exercises device login, and `database/` contains the Postgres schema used by the persistent backend mode.
 
 ## Stack
 
 - `backend/`: Fastify, Zod, JWT auth, in-memory development repository, optional Postgres persistence, local or S3/R2-compatible archive storage, ZIP archive generation.
 - `frontend/`: React, Vite, lucide icons, ClawHub-inspired KovaHub marketplace UI.
-- `database/`: Postgres DDL for users, packages, versions, files, and API tokens.
+- `cli/`: first-party KovaHub CLI skeleton for login, whoami, and publish workflows.
+- `database/`: Postgres DDL for users, organizations, packages, versions, files, tokens, moderation, and device auth.
 - Package manager: `pnpm`.
 
 ## Development
@@ -68,6 +69,12 @@ export GITHUB_CLIENT_SECRET=...
 export GITHUB_CALLBACK_URL=http://localhost:8787/api/v1/auth/github/callback
 ```
 
+Reviewer/moderation access is controlled by GitHub handles:
+
+```bash
+export KOVAHUB_REVIEWER_HANDLES=your-github-handle,another-reviewer
+```
+
 ## Checks
 
 ```bash
@@ -91,25 +98,31 @@ Implemented in the scaffold:
 - Authenticated package highlights/starred packages.
 - Publisher dashboard with package activity and token management.
 - API token creation and bearer-token publishing for CLI/client integrations.
+- Device-code auth for the first-party CLI.
 - Publish package endpoint for `skill`, `code-plugin`, and `bundle-plugin`.
 - Multipart ZIP archive publishing with server-side `package.json`/`SKILL.md` inspection.
-- Optional Postgres persistence for users, packages, versions, files, and package stats.
+- Optional Postgres persistence for users, organizations, packages, versions, files, tokens, moderation, and package stats.
 - Durable local archive storage for persistent mode.
 - S3/R2-compatible archive storage for hosted persistent mode.
 - Package list/search.
-- Package topics, owner filters, tag filters, cursor pagination, and dedicated publisher/topic pages.
+- Package topics, owner filters, tag filters, cursor pagination, search suggestions, and dedicated publisher/topic pages.
 - Discovery sorting by recent, trending, and popular signals.
 - Download, install, and star counters exposed in package stats.
 - Package detail page with compatibility, capability signals, stats, and version history.
 - Package detail tabs for overview, versions, compatibility, files, and discussion.
 - Package comments and authenticated package reports.
+- Reviewer moderation queue for reported packages.
 - Unified search page with all/skills/plugins filters.
 - Audit page for security scan and moderation signals.
+- Owner package settings for metadata edits, rename, transfer, restore, delete, and yanking.
+- Organization publishers with member roles.
+- GitHub repository import preview/publish plus publisher backup/restore endpoints.
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
 - ZIP archive download endpoints.
 - Non-blocking moderation and security scan status placeholders in package verification metadata.
 - Frontend compose publishing, archive ZIP publishing, and API token management.
+- OpenAPI document at `/openapi.json`, baseline security headers, and GitHub Actions CI.
 - Plugin compatibility metadata:
   - publish accepts `compatibility.pluginApi`
   - registry responses expose `compatibility.pluginApiRange`
@@ -132,6 +145,7 @@ ClawHub-inspired frontend routes now present in KovaHub:
 - `/publish`
 - `/skills/publish`
 - `/plugins/publish`
+- `/auth/device`
 - `/packages/:name`
 - `/plugins/:name`
 - `/skills/:slug`
@@ -140,9 +154,11 @@ ClawHub-inspired frontend routes now present in KovaHub:
 
 Registry-compatible read routes:
 
+- `GET /openapi.json`
 - `GET /.well-known/kovahub.json`
 - `GET /api/v1/packages?q=...&family=...&owner=...&tag=...&cursor=...&limit=...`
 - `GET /api/v1/packages/search?q=...&family=...&owner=...&tag=...`
+- `GET /api/v1/search/suggestions?q=...`
 - `GET /api/v1/packages/trending`
 - `GET /api/v1/packages/:name`
 - `GET /api/v1/packages/:name/comments`
@@ -178,11 +194,32 @@ Auth and publish routes:
 - `GET /api/v1/auth/me`
 - `GET /api/v1/auth/profile`
 - `PATCH /api/v1/auth/profile`
+- `POST /api/v1/auth/device/start`
+- `POST /api/v1/auth/device/approve`
+- `POST /api/v1/auth/device/token`
 - `GET /api/v1/whoami`
 - `GET /api/v1/auth/tokens`
 - `POST /api/v1/auth/tokens`
 - `DELETE /api/v1/auth/tokens/:id`
+- `GET /api/v1/me/packages`
+- `GET /api/v1/me/organizations`
+- `GET /api/v1/me/backup`
+- `POST /api/v1/me/restore`
+- `POST /api/v1/organizations`
+- `GET /api/v1/organizations/:handle`
+- `GET /api/v1/organizations/:handle/members`
+- `POST /api/v1/organizations/:handle/members`
+- `GET /api/v1/reviewer/reports`
+- `PATCH /api/v1/reviewer/reports/:id`
+- `POST /api/v1/import/github/preview`
+- `POST /api/v1/import/github`
 - `POST /api/v1/packages`
+- `PATCH /api/v1/packages/:name/settings`
+- `POST /api/v1/packages/:name/rename`
+- `POST /api/v1/packages/:name/transfer`
+- `DELETE /api/v1/packages/:name`
+- `POST /api/v1/packages/:name/restore`
+- `POST /api/v1/packages/:name/versions/:version/yank`
 
 Create an API token with a session JWT, then use the returned `khp_...` token as a bearer token for publishing:
 
@@ -215,17 +252,25 @@ For Kova plugin archives, `package.json` must declare:
 
 Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MAX_ARCHIVE_ENTRIES`, and `KOVAHUB_MAX_EXTRACTED_BYTES`.
 
+## CLI
+
+The first-party CLI package lives in `cli/` and uses the device-code flow:
+
+```bash
+pnpm --filter @kovahub/cli dev login --registry http://localhost:8787
+pnpm --filter @kovahub/cli dev whoami --registry http://localhost:8787
+pnpm --filter @kovahub/cli dev publish ./my-package.zip --registry http://localhost:8787
+```
+
 ## Remaining Hardening
 
-KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, and compatibility surfaces. Remaining ClawHub parity work is:
+KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth, import/export, and compatibility surfaces. Remaining hardening work is:
 
-1. Replace placeholder moderation/security status with real scanner integrations and reviewer workflows.
-2. Add owner package settings: soft-delete/restore, rename, transfer, and merge flows.
-3. Add organization/publisher teams beyond the current user-profile publisher model.
-4. Add device-code auth and a first-party KovaHub CLI package.
-5. Add GitHub import/backup/restore flows.
-6. Add semantic/vector search and richer package README rendering from archive contents.
-7. Add OpenAPI publishing and CI/security workflow parity.
+1. Replace placeholder security status with real scanner integrations, provenance checks, and signed publish metadata.
+2. Add richer package README rendering from archive contents with sanitization.
+3. Add semantic/vector search, notifications, and reviewer assignment workflows.
+4. Add production rate limits, abuse controls, observability, and backup retention policies.
+5. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
 
 ## References
 

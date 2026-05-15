@@ -10,6 +10,7 @@ import {
   type PackageVersionRecord,
 } from "./contracts.js";
 import { requireAuth } from "./auth.js";
+import { openApiDocument } from "./openapi.js";
 import { preparePublishInputFromArchive } from "./packageInspection.js";
 import type {
   AuthPrincipal,
@@ -604,6 +605,8 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     },
   }));
 
+  app.get("/openapi.json", async () => openApiDocument);
+
   app.get("/.well-known/kovahub.json", async () => ({
     name: "KovaHub",
     apiBase: registryUrl(),
@@ -633,6 +636,34 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
 
   app.get("/api/v1/packages/search", async (request, reply) => {
     return searchPackageCatalog(request, reply, repo);
+  });
+
+  app.get("/api/v1/search/suggestions", async (request, reply) => {
+    const parsed = searchQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid search suggestion request." };
+    }
+    const query = parsed.data.q.trim();
+    const packageResults = await repo.searchPackages({ q: query || "*", limit: parsed.data.limit ?? 8 });
+    const catalog = await repo.listPackages({ q: query || undefined, limit: 100 });
+    const tagCounts = new Map<string, number>();
+    const publishers = new Map<string, number>();
+    for (const item of catalog.items) {
+      for (const topic of item.topics ?? []) tagCounts.set(topic, (tagCounts.get(topic) ?? 0) + 1);
+      if (item.ownerHandle) publishers.set(item.ownerHandle, (publishers.get(item.ownerHandle) ?? 0) + 1);
+    }
+    return {
+      packages: packageResults.slice(0, 8).map((result) => result.package),
+      tags: [...tagCounts.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, 8)
+        .map(([tag, count]) => ({ tag, count })),
+      publishers: [...publishers.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, 8)
+        .map(([handle, count]) => ({ handle, count })),
+    };
   });
 
   app.get("/api/v1/packages/trending", async (request, reply) => {
