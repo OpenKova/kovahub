@@ -20,6 +20,7 @@ import {
   normalizeKey,
   seedOwner,
   seedPackageInputs,
+  type ApiTokenRecord,
   type AuthPrincipal,
   type ListPackagesOptions,
   type RegistryRepository,
@@ -66,6 +67,15 @@ type UserRow = QueryResultRow & {
   email: string;
   password_hash: string;
   created_at: Date;
+};
+
+type ApiTokenRow = QueryResultRow & {
+  id: string;
+  user_id: string;
+  name: string;
+  token_hash: string;
+  created_at: Date;
+  last_used_at: Date | null;
 };
 
 const packageColumns = `
@@ -138,6 +148,17 @@ function rowToUser(row: UserRow): UserAccount {
     email: row.email,
     passwordHash: row.password_hash,
     createdAt: timeMs(row.created_at),
+  };
+}
+
+function rowToApiToken(row: ApiTokenRow): ApiTokenRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    tokenHash: row.token_hash,
+    createdAt: timeMs(row.created_at),
+    lastUsedAt: row.last_used_at ? timeMs(row.last_used_at) : null,
   };
 }
 
@@ -244,6 +265,55 @@ export class PostgresRegistryRepository implements RegistryRepository {
 
   async findUserById(id: string) {
     return this.findUser("id", id);
+  }
+
+  async createApiToken(input: { userId: string; name: string; tokenHash: string }) {
+    const result = await this.pool.query<ApiTokenRow>(
+      `
+        insert into api_tokens (user_id, name, token_hash)
+        values ($1, $2, $3)
+        returning id, user_id, name, token_hash, created_at, last_used_at
+      `,
+      [input.userId, input.name, input.tokenHash],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("API token creation failed.");
+    return rowToApiToken(row);
+  }
+
+  async listApiTokens(userId: string) {
+    const result = await this.pool.query<ApiTokenRow>(
+      `
+        select id, user_id, name, token_hash, created_at, last_used_at
+        from api_tokens
+        where user_id = $1
+        order by created_at desc
+      `,
+      [userId],
+    );
+    return result.rows.map(rowToApiToken);
+  }
+
+  async revokeApiToken(input: { userId: string; tokenId: string }) {
+    const result = await this.pool.query<{ id: string }>(
+      "delete from api_tokens where user_id = $1 and id = $2 returning id",
+      [input.userId, input.tokenId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async findUserByApiTokenHash(tokenHash: string) {
+    const result = await this.pool.query<AuthPrincipal>(
+      `
+        update api_tokens t
+        set last_used_at = now()
+        from users u
+        where t.user_id = u.id and t.token_hash = $1
+        returning u.id, u.handle, u.email
+      `,
+      [tokenHash],
+    );
+    return result.rows[0] ?? null;
   }
 
   async listPackages(options: ListPackagesOptions = {}) {

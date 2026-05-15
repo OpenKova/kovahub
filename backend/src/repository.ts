@@ -25,6 +25,15 @@ export type UserAccount = AuthPrincipal & {
   createdAt: number;
 };
 
+export type ApiTokenRecord = {
+  id: string;
+  userId: string;
+  name: string;
+  tokenHash: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+};
+
 export type ListPackagesOptions = {
   q?: string;
   family?: PackageFamily;
@@ -38,6 +47,10 @@ export type RegistryRepository = {
   findUserByEmail(email: string): Promise<UserAccount | null>;
   findUserByHandle(handle: string): Promise<UserAccount | null>;
   findUserById(id: string): Promise<UserAccount | null>;
+  createApiToken(input: { userId: string; name: string; tokenHash: string }): Promise<ApiTokenRecord>;
+  listApiTokens(userId: string): Promise<ApiTokenRecord[]>;
+  revokeApiToken(input: { userId: string; tokenId: string }): Promise<boolean>;
+  findUserByApiTokenHash(tokenHash: string): Promise<AuthPrincipal | null>;
   listPackages(options?: ListPackagesOptions): Promise<{ items: PackageListItem[]; nextCursor: string | null }>;
   searchPackages(options: { q: string; family?: PackageFamily; limit?: number }): Promise<Array<{ score: number; package: PackageListItem }>>;
   getPackage(name: string): Promise<PackageRecord | null>;
@@ -207,6 +220,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly users = new Map<string, UserAccount>();
   private readonly usersByEmail = new Map<string, string>();
   private readonly usersByHandle = new Map<string, string>();
+  private readonly apiTokens = new Map<string, ApiTokenRecord>();
+  private readonly apiTokensByHash = new Map<string, string>();
   private readonly packages = new Map<string, PackageRecord>();
 
   constructor() {
@@ -247,6 +262,45 @@ export class InMemoryRegistryRepository implements RegistryRepository {
 
   async findUserById(id: string) {
     return this.users.get(id) ?? null;
+  }
+
+  async createApiToken(input: { userId: string; name: string; tokenHash: string }) {
+    if (!this.users.has(input.userId)) throw new Error("User does not exist.");
+    if (this.apiTokensByHash.has(input.tokenHash)) throw new Error("API token hash already exists.");
+    const record: ApiTokenRecord = {
+      id: newId("tok"),
+      userId: input.userId,
+      name: input.name,
+      tokenHash: input.tokenHash,
+      createdAt: now(),
+      lastUsedAt: null,
+    };
+    this.apiTokens.set(record.id, record);
+    this.apiTokensByHash.set(record.tokenHash, record.id);
+    return record;
+  }
+
+  async listApiTokens(userId: string) {
+    return [...this.apiTokens.values()]
+      .filter((token) => token.userId === userId)
+      .sort((left, right) => right.createdAt - left.createdAt);
+  }
+
+  async revokeApiToken(input: { userId: string; tokenId: string }) {
+    const token = this.apiTokens.get(input.tokenId);
+    if (!token || token.userId !== input.userId) return false;
+    this.apiTokens.delete(token.id);
+    this.apiTokensByHash.delete(token.tokenHash);
+    return true;
+  }
+
+  async findUserByApiTokenHash(tokenHash: string) {
+    const tokenId = this.apiTokensByHash.get(tokenHash);
+    const token = tokenId ? this.apiTokens.get(tokenId) : null;
+    if (!token) return null;
+    token.lastUsedAt = now();
+    const user = this.users.get(token.userId);
+    return user ? { id: user.id, handle: user.handle, email: user.email } : null;
   }
 
   async listPackages(options: ListPackagesOptions = {}) {
