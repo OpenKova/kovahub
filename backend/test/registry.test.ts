@@ -15,6 +15,21 @@ async function registerAndLogin(app: Awaited<ReturnType<typeof buildServer>>) {
   return response.json<{ token: string }>().token;
 }
 
+async function createApiToken(app: Awaited<ReturnType<typeof buildServer>>, jwt: string) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/tokens",
+    headers: { authorization: `Bearer ${jwt}` },
+    payload: { name: "local cli" },
+  });
+  expect(response.statusCode).toBe(201);
+  const body = response.json<{ token: string; apiToken: { id: string; name: string; lastUsedAt: number | null } }>();
+  expect(body.token).toMatch(/^khp_/);
+  expect(body.apiToken.name).toBe("local cli");
+  expect(body.apiToken.lastUsedAt).toBeNull();
+  return body.token;
+}
+
 describe("registry api", () => {
   it("serves ClawHub-compatible package search and detail responses", async () => {
     const app = await buildServer();
@@ -85,6 +100,39 @@ describe("registry api", () => {
     });
     expect(publish.statusCode).toBe(400);
     expect(publish.json().error).toContain("compatibility.pluginApi");
+    await app.close();
+  });
+
+  it("creates API tokens and accepts them for package publishing", async () => {
+    const app = await buildServer();
+    const jwt = await registerAndLogin(app);
+    const apiToken = await createApiToken(app, jwt);
+
+    const publish = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${apiToken}` },
+      payload: {
+        name: "@tester/token-plugin",
+        displayName: "Token Plugin",
+        family: "code-plugin",
+        version: "0.1.0",
+        compatibility: {
+          pluginApi: "^1.0.0",
+          minGatewayVersion: "2026.3.0",
+        },
+      },
+    });
+    expect(publish.statusCode).toBe(201);
+    expect(publish.json().package.ownerHandle).toBe("tester");
+
+    const tokens = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/tokens",
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(tokens.statusCode).toBe(200);
+    expect(tokens.json().tokens[0].lastUsedAt).toEqual(expect.any(Number));
     await app.close();
   });
 });

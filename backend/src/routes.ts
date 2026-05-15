@@ -151,7 +151,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
   });
 
   app.post("/api/v1/packages", async (request, reply) => {
-    const user = await requireAuth(request, reply);
+    const user = await requireAuth(request, reply, repo);
     if (!user) return reply;
     const parsed = publishPackageSchema.safeParse(request.body);
     if (!parsed.success) {
