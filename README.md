@@ -15,6 +15,7 @@ The MVP scaffold is intentionally small: a TypeScript backend exposes KovaHub re
 
 ```bash
 pnpm install
+cp .env.example .env
 pnpm dev:backend
 pnpm dev:frontend
 ```
@@ -47,7 +48,7 @@ For GitHub login, create a GitHub OAuth app and set its callback URL to:
 http://localhost:8787/api/v1/auth/github/callback
 ```
 
-Then set:
+Then set these in `.env` or export them in the backend shell:
 
 ```bash
 export GITHUB_CLIENT_ID=...

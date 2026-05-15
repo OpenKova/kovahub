@@ -2,9 +2,12 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { registerAuthRoutes } from "./auth.js";
+import { loadLocalEnv } from "./env.js";
 import { createPostgresRegistryRepository } from "./postgresRepository.js";
 import { InMemoryRegistryRepository, type RegistryRepository } from "./repository.js";
 import { registerRegistryRoutes } from "./routes.js";
+
+loadLocalEnv();
 
 async function createDefaultRepository(): Promise<RegistryRepository> {
   if (process.env.DATABASE_URL) return createPostgresRegistryRepository();
