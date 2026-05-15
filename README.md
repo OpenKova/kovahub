@@ -62,6 +62,7 @@ Implemented in the scaffold:
 - Account registration, login, and bearer-token auth.
 - API token creation and bearer-token publishing for CLI/client integrations.
 - Publish package endpoint for `skill`, `code-plugin`, and `bundle-plugin`.
+- Multipart ZIP archive publishing with server-side `package.json`/`SKILL.md` inspection.
 - Optional Postgres persistence for users, packages, versions, files, and package stats.
 - Durable local archive storage for persistent mode.
 - Package list/search.
@@ -110,16 +111,29 @@ curl -X POST http://localhost:8787/api/v1/packages \
   -d @package-publish.json
 ```
 
+The same publish endpoint accepts multipart archive uploads. The uploaded file must be a ZIP in form field `archive`; optional publish overrides can be supplied as a JSON `metadata` field:
+
+```bash
+curl -X POST http://localhost:8787/api/v1/packages \
+  -H "authorization: Bearer $KOVAHUB_API_TOKEN" \
+  -F archive=@./my-kova-plugin.zip \
+  -F 'metadata={"displayName":"My Kova Plugin","tags":["plugin","kova"]};type=application/json'
+```
+
+For Kova plugin archives, `package.json` must declare:
+
+- `kova.compat.pluginApi`
+- `kova.compat.minGatewayVersion` or `kova.install.minHostVersion`
+- `kova.build.kovaVersion`
+
+Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MAX_ARCHIVE_ENTRIES`, and `KOVAHUB_MAX_EXTRACTED_BYTES`.
+
 ## Next MVP Steps
 
-1. Add multipart archive publishing and server-side package inspection.
-2. Validate plugin package metadata from `package.json`:
-   - `kova.compat.pluginApi`
-   - `kova.compat.minGatewayVersion`
-   - `kova.build.kovaVersion`
-3. Add S3/R2-compatible archive storage for hosted deployments.
-4. Add moderation/security scan placeholders before packages become public.
-5. Add pagination, tags, owner pages, and version history to the frontend.
+1. Add frontend file upload controls for archive publishing.
+2. Add S3/R2-compatible archive storage for hosted deployments.
+3. Add moderation/security scan placeholders before packages become public.
+4. Add pagination, tags, owner pages, and version history to the frontend.
 
 ## References
 
