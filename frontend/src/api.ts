@@ -122,6 +122,12 @@ export async function revokeApiToken(id: string) {
   });
 }
 
+export function githubLoginUrl(returnTo = "/publish") {
+  const query = new URLSearchParams();
+  query.set("returnTo", returnTo);
+  return `${apiBase}/api/v1/auth/github/start?${query.toString()}`;
+}
+
 export function packageDownloadUrl(name: string, version?: string | null) {
   const query = new URLSearchParams();
   if (version) query.set("version", version);

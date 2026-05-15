@@ -23,6 +23,9 @@ export type AuthPrincipal = {
 
 export type UserAccount = AuthPrincipal & {
   passwordHash: string;
+  githubId?: string | null;
+  displayName?: string | null;
+  imageUrl?: string | null;
   createdAt: number;
 };
 
@@ -45,6 +48,13 @@ export type ListPackagesOptions = {
 export type RegistryRepository = {
   close?(): Promise<void>;
   createUser(input: { handle: string; email: string; passwordHash: string }): Promise<UserAccount>;
+  findOrCreateGitHubUser(input: {
+    githubId: string;
+    login: string;
+    email: string;
+    displayName?: string | null;
+    imageUrl?: string | null;
+  }): Promise<UserAccount>;
   findUserByEmail(email: string): Promise<UserAccount | null>;
   findUserByHandle(handle: string): Promise<UserAccount | null>;
   findUserById(id: string): Promise<UserAccount | null>;
@@ -82,6 +92,17 @@ function sha256Hex(bytes: Uint8Array | Buffer) {
 
 export function normalizeKey(value: string) {
   return value.trim().toLowerCase();
+}
+
+function normalizeHandle(value: string) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-{2,}/g, "-") || "github-user"
+  );
 }
 
 function fileBytes(input: ArchiveFileInput) {
@@ -232,6 +253,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly users = new Map<string, UserAccount>();
   private readonly usersByEmail = new Map<string, string>();
   private readonly usersByHandle = new Map<string, string>();
+  private readonly usersByGithubId = new Map<string, string>();
   private readonly apiTokens = new Map<string, ApiTokenRecord>();
   private readonly apiTokensByHash = new Map<string, string>();
   private readonly packages = new Map<string, PackageRecord>();
@@ -254,11 +276,61 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       handle,
       email,
       passwordHash: input.passwordHash,
+      githubId: null,
+      displayName: null,
+      imageUrl: null,
       createdAt: now(),
     };
     this.users.set(user.id, user);
     this.usersByEmail.set(email, user.id);
     this.usersByHandle.set(handle, user.id);
+    return user;
+  }
+
+  async findOrCreateGitHubUser(input: {
+    githubId: string;
+    login: string;
+    email: string;
+    displayName?: string | null;
+    imageUrl?: string | null;
+  }) {
+    const existingGithubUserId = this.usersByGithubId.get(input.githubId);
+    const existingGithubUser = existingGithubUserId ? this.users.get(existingGithubUserId) : null;
+    if (existingGithubUser) return existingGithubUser;
+
+    const email = normalizeKey(input.email);
+    const existingEmailUserId = this.usersByEmail.get(email);
+    const existingEmailUser = existingEmailUserId ? this.users.get(existingEmailUserId) : null;
+    if (existingEmailUser) {
+      if (existingEmailUser.githubId && existingEmailUser.githubId !== input.githubId) {
+        throw new Error("Email is already linked to a different GitHub account.");
+      }
+      existingEmailUser.githubId = input.githubId;
+      existingEmailUser.displayName = input.displayName ?? existingEmailUser.displayName ?? null;
+      existingEmailUser.imageUrl = input.imageUrl ?? existingEmailUser.imageUrl ?? null;
+      this.usersByGithubId.set(input.githubId, existingEmailUser.id);
+      return existingEmailUser;
+    }
+
+    const baseHandle = normalizeHandle(input.login);
+    let handle = baseHandle;
+    for (let index = 2; this.usersByHandle.has(handle); index += 1) {
+      handle = `${baseHandle}-${index}`;
+    }
+    const user: UserAccount = {
+      id: newId("user"),
+      handle,
+      email,
+      passwordHash: `github-oauth:${input.githubId}`,
+      githubId: input.githubId,
+      displayName: input.displayName ?? null,
+      imageUrl: input.imageUrl ?? null,
+      createdAt: now(),
+    };
+    this.users.set(user.id, user);
+    this.usersByEmail.set(user.email, user.id);
+    this.usersByHandle.set(user.handle, user.id);
+    this.usersByGithubId.set(input.githubId, user.id);
     return user;
   }
 

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { archiveStorageKey, type ArchiveStore, LocalArchiveStore } from "./archiveStore.js";
 import {
@@ -66,6 +66,9 @@ type UserRow = QueryResultRow & {
   handle: string;
   email: string;
   password_hash: string;
+  github_id: string | null;
+  display_name: string | null;
+  image_url: string | null;
   created_at: Date;
 };
 
@@ -147,6 +150,9 @@ function rowToUser(row: UserRow): UserAccount {
     handle: row.handle,
     email: row.email,
     passwordHash: row.password_hash,
+    githubId: row.github_id,
+    displayName: row.display_name,
+    imageUrl: row.image_url,
     createdAt: timeMs(row.created_at),
   };
 }
@@ -204,7 +210,10 @@ function rowToVersion(row: PackageVersionRow, archive: Buffer = Buffer.alloc(0))
 }
 
 export async function runPostgresMigrations(pool: Pool) {
-  const migrationSql = await readFile(new URL("../../database/migrations/0001_init.sql", import.meta.url), "utf8");
+  const migrationDir = new URL("../../database/migrations/", import.meta.url);
+  const migrationFiles = (await readdir(migrationDir))
+    .filter((file) => /^\d+_.+\.sql$/.test(file))
+    .sort((left, right) => left.localeCompare(right));
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -214,13 +223,16 @@ export async function runPostgresMigrations(pool: Pool) {
         applied_at timestamptz not null default now()
       )
     `);
-    const applied = await client.query<{ exists: boolean }>(
-      "select exists(select 1 from schema_migrations where version = $1) as exists",
-      ["0001_init"],
-    );
-    if (!applied.rows[0]?.exists) {
+    for (const file of migrationFiles) {
+      const version = file.replace(/\.sql$/, "");
+      const applied = await client.query<{ exists: boolean }>(
+        "select exists(select 1 from schema_migrations where version = $1) as exists",
+        [version],
+      );
+      if (applied.rows[0]?.exists) continue;
+      const migrationSql = await readFile(new URL(file, migrationDir), "utf8");
       await client.query(migrationSql);
-      await client.query("insert into schema_migrations (version) values ($1)", ["0001_init"]);
+      await client.query("insert into schema_migrations (version) values ($1)", [version]);
     }
     await client.query("commit");
   } catch (error) {
@@ -246,13 +258,101 @@ export class PostgresRegistryRepository implements RegistryRepository {
       `
         insert into users (handle, email, password_hash)
         values ($1, $2, $3)
-        returning id, handle, email, password_hash, created_at
+        returning id, handle, email, password_hash, github_id, display_name, image_url, created_at
       `,
       [normalizeKey(input.handle), normalizeKey(input.email), input.passwordHash],
     );
     const row = result.rows[0];
     if (!row) throw new Error("User creation failed.");
     return rowToUser(row);
+  }
+
+  async findOrCreateGitHubUser(input: {
+    githubId: string;
+    login: string;
+    email: string;
+    displayName?: string | null;
+    imageUrl?: string | null;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const existingGithub = await client.query<UserRow>(
+        `
+          select id, handle, email, password_hash, github_id, display_name, image_url, created_at
+          from users
+          where github_id = $1
+          limit 1
+        `,
+        [input.githubId],
+      );
+      const githubRow = existingGithub.rows[0];
+      if (githubRow) {
+        await client.query("commit");
+        return rowToUser(githubRow);
+      }
+
+      const email = normalizeKey(input.email);
+      const existingEmail = await client.query<UserRow>(
+        `
+          select id, handle, email, password_hash, github_id, display_name, image_url, created_at
+          from users
+          where email = $1
+          limit 1
+          for update
+        `,
+        [email],
+      );
+      const emailRow = existingEmail.rows[0];
+      if (emailRow) {
+        if (emailRow.github_id && emailRow.github_id !== input.githubId) {
+          throw new Error("Email is already linked to a different GitHub account.");
+        }
+        const linked = await client.query<UserRow>(
+          `
+            update users
+            set
+              github_id = $2,
+              display_name = coalesce($3, display_name),
+              image_url = coalesce($4, image_url),
+              updated_at = now()
+            where id = $1
+            returning id, handle, email, password_hash, github_id, display_name, image_url, created_at
+          `,
+          [emailRow.id, input.githubId, input.displayName ?? null, input.imageUrl ?? null],
+        );
+        const linkedRow = linked.rows[0];
+        if (!linkedRow) throw new Error("GitHub account linking failed.");
+        await client.query("commit");
+        return rowToUser(linkedRow);
+      }
+
+      const handle = await this.createUniqueHandle(client, input.login);
+      const inserted = await client.query<UserRow>(
+        `
+          insert into users (handle, email, password_hash, github_id, display_name, image_url, auth_provider)
+          values ($1, $2, $3, $4, $5, $6, 'github')
+          returning id, handle, email, password_hash, github_id, display_name, image_url, created_at
+        `,
+        [
+          handle,
+          email,
+          `github-oauth:${input.githubId}`,
+          input.githubId,
+          input.displayName ?? null,
+          input.imageUrl ?? null,
+        ],
+      );
+      const row = inserted.rows[0];
+      if (!row) throw new Error("GitHub user creation failed.");
+      await client.query("commit");
+      return rowToUser(row);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findUserByEmail(email: string) {
@@ -594,7 +694,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
   private async findUser(field: "id" | "email" | "handle", value: string) {
     const result = await this.pool.query<UserRow>(
       `
-        select id, handle, email, password_hash, created_at
+        select id, handle, email, password_hash, github_id, display_name, image_url, created_at
         from users
         where ${field} = $1
         limit 1
@@ -603,6 +703,26 @@ export class PostgresRegistryRepository implements RegistryRepository {
     );
     const row = result.rows[0];
     return row ? rowToUser(row) : null;
+  }
+
+  private async createUniqueHandle(client: PoolClient, login: string) {
+    const base =
+      login
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .replace(/-{2,}/g, "-") || "github-user";
+    let handle = base;
+    for (let index = 2; index < 1000; index += 1) {
+      const result = await client.query<{ exists: boolean }>(
+        "select exists(select 1 from users where handle = $1) as exists",
+        [handle],
+      );
+      if (!result.rows[0]?.exists) return handle;
+      handle = `${base}-${index}`;
+    }
+    throw new Error("Could not allocate a unique GitHub handle.");
   }
 
   private async getPackageRow(name: string) {

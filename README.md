@@ -41,6 +41,20 @@ export KOVAHUB_SITE=http://localhost:5173
 export KOVAHUB_REGISTRY=http://localhost:8787
 ```
 
+For GitHub login, create a GitHub OAuth app and set its callback URL to:
+
+```text
+http://localhost:8787/api/v1/auth/github/callback
+```
+
+Then set:
+
+```bash
+export GITHUB_CLIENT_ID=...
+export GITHUB_CLIENT_SECRET=...
+export GITHUB_CALLBACK_URL=http://localhost:8787/api/v1/auth/github/callback
+```
+
 ## Checks
 
 ```bash
@@ -60,6 +74,7 @@ pnpm exec playwright install chromium
 Implemented in the scaffold:
 
 - Account registration, login, and bearer-token auth.
+- GitHub OAuth login for browser sessions.
 - API token creation and bearer-token publishing for CLI/client integrations.
 - Publish package endpoint for `skill`, `code-plugin`, and `bundle-plugin`.
 - Multipart ZIP archive publishing with server-side `package.json`/`SKILL.md` inspection.
@@ -93,6 +108,8 @@ Auth and publish routes:
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `GET /api/v1/auth/github/start?returnTo=/publish`
+- `GET /api/v1/auth/github/callback`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/auth/tokens`
 - `POST /api/v1/auth/tokens`

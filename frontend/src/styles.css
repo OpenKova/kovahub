@@ -81,6 +81,7 @@ button {
 .pill,
 .verified,
 .primary-action,
+.secondary-action,
 .filter-row,
 .mode-tabs,
 .section-title,
@@ -435,6 +436,56 @@ code {
   width: 100%;
 }
 
+.secondary-action {
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #fff;
+  padding: 0 14px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.secondary-action:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.secondary-action.full {
+  width: 100%;
+}
+
+.github-action {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: #f5f5f5;
+  color: #111;
+}
+
+.github-action:hover {
+  background: #fff;
+}
+
+.auth-divider {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  height: 1px;
+  background: var(--line);
+  content: "";
+}
+
 .pill {
   gap: 6px;
   min-height: 28px;
@@ -548,6 +599,18 @@ code {
 
 .auth-card {
   max-width: 520px;
+}
+
+.auth-callback-shell {
+  display: grid;
+  place-items: center;
+  width: min(520px, calc(100vw - 40px));
+  min-height: 100vh;
+  margin: 0 auto;
+}
+
+.auth-callback-shell .auth-card {
+  width: 100%;
 }
 
 .form-grid {

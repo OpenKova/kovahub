@@ -5,6 +5,7 @@ import {
   Code2,
   Copy,
   FileArchive,
+  Github,
   History,
   KeyRound,
   Package,
@@ -27,6 +28,7 @@ import {
   fetchPackages,
   getApiBase,
   getStoredToken,
+  githubLoginUrl,
   login,
   packageDownloadUrl,
   publishArchivePackage,
@@ -77,6 +79,11 @@ function formatDate(value: number) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(
     new Date(value),
   );
+}
+
+function safeLocalPath(value: string | null) {
+  if (value?.startsWith("/") && !value.startsWith("//")) return value;
+  return "/publish";
 }
 
 function packageRoute(name: string) {
@@ -299,6 +306,7 @@ function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
   const [email, setEmail] = useState("builder@example.com");
   const [password, setPassword] = useState("correct-horse");
   const [error, setError] = useState<string | null>(null);
+  const returnTo = `${window.location.pathname}${window.location.search}`;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -320,6 +328,13 @@ function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
       <div className="section-title">
         <KeyRound size={17} aria-hidden="true" />
         <h2>{mode === "register" ? "Create account" : "Sign in"}</h2>
+      </div>
+      <a className="secondary-action github-action full" href={githubLoginUrl(returnTo)}>
+        <Github size={16} aria-hidden="true" />
+        Continue with GitHub
+      </a>
+      <div className="auth-divider">
+        <span>or</span>
       </div>
       {mode === "register" ? (
         <label>
@@ -351,6 +366,45 @@ function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
         {mode === "register" ? "Use existing account" : "Create a new account"}
       </button>
     </form>
+  );
+}
+
+function GitHubAuthCallback() {
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const returnTo = safeLocalPath(query.get("returnTo"));
+    const token = hash.get("token");
+
+    if (token) {
+      storeToken(token);
+      navigate(returnTo, { replace: true });
+      return;
+    }
+
+    setError(query.get("error") ?? "GitHub sign-in failed.");
+  }, [navigate]);
+
+  return (
+    <main className="auth-callback-shell">
+      <section className="auth-card">
+        <div className="section-title">
+          <Github size={17} aria-hidden="true" />
+          <h2>{error ? "GitHub sign-in failed" : "Completing sign-in"}</h2>
+        </div>
+        <p className={error ? "form-error" : "muted"}>
+          {error ?? "Finishing your KovaHub session..."}
+        </p>
+        {error ? (
+          <Link className="primary-action full" to="/publish">
+            Back to login
+          </Link>
+        ) : null}
+      </section>
+    </main>
   );
 }
 
@@ -907,6 +961,7 @@ export default function App() {
       <Route path="/" element={<Marketplace />} />
       <Route path="/packages/*" element={<Marketplace />} />
       <Route path="/publish" element={<Marketplace publishMode />} />
+      <Route path="/auth/github/callback" element={<GitHubAuthCallback />} />
     </Routes>
   );
 }

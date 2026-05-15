@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { strToU8, unzipSync, zipSync } from "fflate";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildServer } from "../src/server.js";
 
 const multipartBoundary = "----kovahub-test-boundary";
@@ -393,6 +393,108 @@ describe("registry api", () => {
     expect(tokens.statusCode).toBe(200);
     expect(tokens.json().tokens).toEqual([]);
     await app.close();
+  });
+
+  it("completes GitHub OAuth login and creates a KovaHub session", async () => {
+    const previousClientId = process.env.GITHUB_CLIENT_ID;
+    const previousClientSecret = process.env.GITHUB_CLIENT_SECRET;
+    const previousSite = process.env.KOVAHUB_SITE;
+    const previousRegistry = process.env.KOVAHUB_REGISTRY;
+    const originalFetch = globalThis.fetch;
+
+    process.env.GITHUB_CLIENT_ID = "test-github-client";
+    process.env.GITHUB_CLIENT_SECRET = "test-github-secret";
+    process.env.KOVAHUB_SITE = "http://localhost:5173";
+    process.env.KOVAHUB_REGISTRY = "http://localhost:8787";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "https://github.com/login/oauth/access_token") {
+        return new Response(JSON.stringify({ access_token: "gho_test" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "https://api.github.com/user") {
+        return new Response(
+          JSON.stringify({
+            id: 12345,
+            login: "Octo-Builder",
+            name: "Octo Builder",
+            avatar_url: "https://avatars.example/octo.png",
+            email: null,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url === "https://api.github.com/user/emails") {
+        return new Response(
+          JSON.stringify([{ email: "octo@example.com", primary: true, verified: true }]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`Unexpected GitHub fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const app = await buildServer();
+    try {
+      const start = await app.inject("/api/v1/auth/github/start?returnTo=%2Fpublish");
+      expect(start.statusCode).toBe(302);
+      const authorizeLocation = start.headers.location;
+      expect(authorizeLocation).toEqual(expect.any(String));
+      const authorize = new URL(authorizeLocation as string);
+      expect(`${authorize.origin}${authorize.pathname}`).toBe("https://github.com/login/oauth/authorize");
+      expect(authorize.searchParams.get("client_id")).toBe("test-github-client");
+      expect(authorize.searchParams.get("redirect_uri")).toBe(
+        "http://localhost:8787/api/v1/auth/github/callback",
+      );
+      expect(authorize.searchParams.get("scope")).toBe("read:user user:email");
+
+      const state = authorize.searchParams.get("state");
+      expect(state).toEqual(expect.any(String));
+      const setCookie = start.headers["set-cookie"];
+      const stateCookie = Array.isArray(setCookie) ? setCookie[0] : String(setCookie);
+      const cookieHeader = stateCookie.split(";")[0];
+      expect(cookieHeader).toContain("kovahub_github_state=");
+
+      const callback = await app.inject({
+        method: "GET",
+        url: `/api/v1/auth/github/callback?code=oauth-code&state=${state}`,
+        headers: { cookie: cookieHeader },
+      });
+      expect(callback.statusCode).toBe(302);
+      const frontendCallback = new URL(callback.headers.location as string);
+      expect(`${frontendCallback.origin}${frontendCallback.pathname}`).toBe(
+        "http://localhost:5173/auth/github/callback",
+      );
+      expect(frontendCallback.searchParams.get("returnTo")).toBe("/publish");
+      const token = new URLSearchParams(frontendCallback.hash.slice(1)).get("token");
+      expect(token).toEqual(expect.any(String));
+
+      const me = await app.inject({
+        method: "GET",
+        url: "/api/v1/auth/me",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(me.statusCode).toBe(200);
+      expect(me.json().user).toMatchObject({
+        handle: "octo-builder",
+        email: "octo@example.com",
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousClientId === undefined) delete process.env.GITHUB_CLIENT_ID;
+      else process.env.GITHUB_CLIENT_ID = previousClientId;
+      if (previousClientSecret === undefined) delete process.env.GITHUB_CLIENT_SECRET;
+      else process.env.GITHUB_CLIENT_SECRET = previousClientSecret;
+      if (previousSite === undefined) delete process.env.KOVAHUB_SITE;
+      else process.env.KOVAHUB_SITE = previousSite;
+      if (previousRegistry === undefined) delete process.env.KOVAHUB_REGISTRY;
+      else process.env.KOVAHUB_REGISTRY = previousRegistry;
+      await app.close();
+    }
   });
 
   it("publishes a Kova plugin archive from multipart upload", async () => {
