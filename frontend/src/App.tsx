@@ -59,6 +59,8 @@ const familyIcons: Record<PackageFamily, typeof Sparkles> = {
   "bundle-plugin": Boxes,
 };
 
+const skillSlugPattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
+
 function optionalText(value: string) {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
@@ -563,6 +565,14 @@ function PublishPanel({
     return publishArchivePackage(archiveFile, metadata);
   }
 
+  function updateFamily(nextFamily: PackageFamily) {
+    setFamily(nextFamily);
+    if (nextFamily === "skill") {
+      if (!skillSlugPattern.test(name)) setName("demo-skill");
+      if (displayName === "Demo Plugin") setDisplayName("Demo Skill");
+    }
+  }
+
   if (!user) return <AuthPanel onAuth={onAuth} />;
 
   return (
@@ -611,7 +621,7 @@ function PublishPanel({
             </label>
             <label>
               Family
-              <select value={family} onChange={(event) => setFamily(event.target.value as PackageFamily)}>
+              <select value={family} onChange={(event) => updateFamily(event.target.value as PackageFamily)}>
                 <option value="code-plugin">Code plugin</option>
                 <option value="bundle-plugin">Bundle plugin</option>
                 <option value="skill">Skill</option>
