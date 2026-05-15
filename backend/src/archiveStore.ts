@@ -166,9 +166,12 @@ export class S3ArchiveStore implements ArchiveStore {
 export function createArchiveStoreFromEnv(): ArchiveStore {
   const storage = process.env.KOVAHUB_ARCHIVE_STORAGE ?? "local";
   if (storage === "local") {
+    if (process.env.VERCEL === "1") {
+      throw new Error("KOVAHUB_ARCHIVE_STORAGE=s3 or supabase is required on Vercel.");
+    }
     return new LocalArchiveStore(process.env.KOVAHUB_ARCHIVE_DIR ?? ".kovahub/archives");
   }
-  if (storage === "s3" || storage === "r2") {
+  if (storage === "s3" || storage === "r2" || storage === "supabase") {
     return new S3ArchiveStore({
       endpoint: requireEnv("KOVAHUB_S3_ENDPOINT"),
       bucket: requireEnv("KOVAHUB_S3_BUCKET"),

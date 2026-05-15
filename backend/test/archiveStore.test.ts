@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { LocalArchiveStore, S3ArchiveStore } from "../src/archiveStore.js";
+import { createArchiveStoreFromEnv, LocalArchiveStore, S3ArchiveStore } from "../src/archiveStore.js";
 
 describe("archive stores", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("rejects unsafe local archive keys", async () => {
@@ -76,5 +77,23 @@ describe("archive stores", () => {
     });
 
     await expect(store.get("packages/missing/file.zip")).resolves.toBeNull();
+  });
+
+  it("supports Supabase as an S3-compatible archive storage target", () => {
+    vi.stubEnv("KOVAHUB_ARCHIVE_STORAGE", "supabase");
+    vi.stubEnv("KOVAHUB_S3_ENDPOINT", "https://project-ref.supabase.co/storage/v1/s3");
+    vi.stubEnv("KOVAHUB_S3_BUCKET", "kovahub-archives");
+    vi.stubEnv("KOVAHUB_S3_REGION", "us-east-1");
+    vi.stubEnv("KOVAHUB_S3_ACCESS_KEY_ID", "access-key");
+    vi.stubEnv("KOVAHUB_S3_SECRET_ACCESS_KEY", "secret-key");
+
+    expect(createArchiveStoreFromEnv()).toBeInstanceOf(S3ArchiveStore);
+  });
+
+  it("rejects local archive storage on Vercel", () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("KOVAHUB_ARCHIVE_STORAGE", "local");
+
+    expect(() => createArchiveStoreFromEnv()).toThrow("KOVAHUB_ARCHIVE_STORAGE=s3 or supabase is required on Vercel.");
   });
 });

@@ -1,4 +1,6 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { archiveStorageKey, createArchiveStoreFromEnv, type ArchiveStore } from "./archiveStore.js";
 import {
@@ -398,7 +400,7 @@ function rowToVersion(row: PackageVersionRow, archive: Buffer = Buffer.alloc(0))
 }
 
 export async function runPostgresMigrations(pool: Pool) {
-  const migrationDir = new URL("../../database/migrations/", import.meta.url);
+  const migrationDir = await findPostgresMigrationDir();
   const migrationFiles = (await readdir(migrationDir))
     .filter((file) => /^\d+_.+\.sql$/.test(file))
     .sort((left, right) => left.localeCompare(right));
@@ -429,6 +431,33 @@ export async function runPostgresMigrations(pool: Pool) {
   } finally {
     client.release();
   }
+}
+
+function directoryUrlFromPath(path: string) {
+  const url = pathToFileURL(path);
+  return new URL(`${url.href.replace(/\/?$/, "/")}`);
+}
+
+async function findPostgresMigrationDir() {
+  const envPath = process.env.KOVAHUB_MIGRATIONS_DIR;
+  const candidates = [
+    envPath ? directoryUrlFromPath(resolve(process.cwd(), envPath)) : null,
+    new URL("../../database/migrations/", import.meta.url),
+    directoryUrlFromPath(resolve(process.cwd(), "database/migrations")),
+    directoryUrlFromPath(resolve(process.cwd(), "../database/migrations")),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Try the next known layout.
+    }
+  }
+
+  throw new Error("Postgres migration directory was not found. Set KOVAHUB_MIGRATIONS_DIR=database/migrations.");
 }
 
 export class PostgresRegistryRepository implements RegistryRepository {

@@ -83,6 +83,10 @@ pnpm test
 pnpm build
 ```
 
+## Deployment
+
+For the free MVP hosting path, use Vercel for the frontend/API function and Supabase for Postgres plus archive storage. See [docs/deploy-vercel-supabase.md](docs/deploy-vercel-supabase.md).
+
 Rendered frontend QA uses Playwright:
 
 ```bash
