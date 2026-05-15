@@ -1,10 +1,17 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { registerAuthRoutes } from "./auth.js";
+import { createPostgresRegistryRepository } from "./postgresRepository.js";
 import { InMemoryRegistryRepository, type RegistryRepository } from "./repository.js";
 import { registerRegistryRoutes } from "./routes.js";
 
-export async function buildServer(repo: RegistryRepository = new InMemoryRegistryRepository()) {
+async function createDefaultRepository(): Promise<RegistryRepository> {
+  if (process.env.DATABASE_URL) return createPostgresRegistryRepository();
+  return new InMemoryRegistryRepository();
+}
+
+export async function buildServer(repo?: RegistryRepository) {
+  const activeRepo = repo ?? (await createDefaultRepository());
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "info",
@@ -17,8 +24,12 @@ export async function buildServer(repo: RegistryRepository = new InMemoryRegistr
     methods: ["GET", "POST", "OPTIONS"],
   });
 
-  await registerAuthRoutes(app, repo);
-  await registerRegistryRoutes(app, repo);
+  await registerAuthRoutes(app, activeRepo);
+  await registerRegistryRoutes(app, activeRepo);
+
+  app.addHook("onClose", async () => {
+    await activeRepo.close?.();
+  });
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);

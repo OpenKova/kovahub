@@ -10,3 +10,4 @@ coverage/
 
 backend/.data/
 frontend/.vite/
+.kovahub/

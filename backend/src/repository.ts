@@ -33,6 +33,7 @@ export type ListPackagesOptions = {
 };
 
 export type RegistryRepository = {
+  close?(): Promise<void>;
   createUser(input: { handle: string; email: string; passwordHash: string }): Promise<UserAccount>;
   findUserByEmail(email: string): Promise<UserAccount | null>;
   findUserByHandle(handle: string): Promise<UserAccount | null>;
@@ -46,7 +47,7 @@ export type RegistryRepository = {
   recordDownload(name: string): Promise<void>;
 };
 
-type ArchiveFileInput = {
+export type ArchiveFileInput = {
   path: string;
   content?: string;
   contentBase64?: string;
@@ -65,7 +66,7 @@ function sha256Hex(bytes: Uint8Array | Buffer) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function normalizeKey(value: string) {
+export function normalizeKey(value: string) {
   return value.trim().toLowerCase();
 }
 
@@ -74,7 +75,7 @@ function fileBytes(input: ArchiveFileInput) {
   return Buffer.from(input.content ?? "", "utf8");
 }
 
-function buildArchive(files: ArchiveFileInput[]) {
+export function buildArchive(files: ArchiveFileInput[]) {
   const entries: Record<string, Uint8Array> = {};
   for (const file of files) {
     entries[file.path] = fileBytes(file);
@@ -82,7 +83,7 @@ function buildArchive(files: ArchiveFileInput[]) {
   return Buffer.from(zipSync(entries, { level: 6 }));
 }
 
-function buildFileMetadata(files: ArchiveFileInput[]): PackageFile[] {
+export function buildFileMetadata(files: ArchiveFileInput[]): PackageFile[] {
   return files.map((file) => {
     const bytes = fileBytes(file);
     return {
@@ -116,7 +117,7 @@ function scorePackage(pkg: PackageRecord, query: string) {
   return 10;
 }
 
-function defaultFilesFor(input: PublishPackageInput) {
+export function defaultFilesFor(input: PublishPackageInput) {
   if (input.files.length > 0) return input.files;
   const displayName = input.displayName ?? input.name;
   const metadata = {
@@ -146,7 +147,7 @@ function defaultFilesFor(input: PublishPackageInput) {
   ];
 }
 
-function normalizeCapabilities(
+export function normalizeCapabilities(
   input: PublishPackageInput,
   compatibility: PackageCompatibility | null,
 ): PackageCapabilitySummary | null {
@@ -174,7 +175,7 @@ function normalizeCapabilities(
   };
 }
 
-function createPackageVersion(input: {
+export function createPackageVersion(input: {
   payload: PublishPackageInput;
   compatibility: PackageCompatibility | null;
   capabilities: PackageCapabilitySummary | null;
@@ -377,79 +378,81 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   }
 
   private seedPackages() {
-    const seedOwner: AuthPrincipal = {
-      id: "seed-openkova",
-      handle: "openkova",
-      email: "seed@kovahub.local",
-    };
-    const seeds: PublishPackageInput[] = [
-      {
-        name: "@openkova/context-bridge",
-        displayName: "Context Bridge",
-        family: "code-plugin",
-        version: "0.1.0",
-        summary: "Gateway-side context extension for Kova and OpenClaw agents.",
-        changelog: "Initial public KovaHub seed.",
-        channel: "official",
-        tags: ["context", "gateway"],
-        compatibility: {
-          pluginApi: "^1.0.0",
-          minGatewayVersion: "2026.3.0",
-          builtWithOpenClawVersion: "2026.3.0",
-        },
-        capabilities: {
-          executesCode: true,
-          runtimeId: "@openkova/context-bridge",
-          providers: ["context"],
-          capabilityTags: ["provider:context", "requires:gateway"],
-        },
-        files: [
-          {
-            path: "package.json",
-            content: JSON.stringify(
-              {
-                name: "@openkova/context-bridge",
-                version: "0.1.0",
-                openclaw: {
-                  compat: {
-                    pluginApi: "^1.0.0",
-                    minGatewayVersion: "2026.3.0",
-                  },
-                },
-              },
-              null,
-              2,
-            ),
-            contentType: "application/json",
-          },
-          {
-            path: "README.md",
-            content: "# Context Bridge\n\nGateway-side context extension seed package.\n",
-            contentType: "text/markdown",
-          },
-        ],
-      },
-      {
-        name: "release-notes-sherpa",
-        displayName: "Release Notes Sherpa",
-        family: "skill",
-        version: "1.0.0",
-        summary: "Turns changelogs and commit ranges into concise release notes.",
-        changelog: "Initial skill seed.",
-        channel: "community",
-        tags: ["docs", "release-notes"],
-        files: [
-          {
-            path: "SKILL.md",
-            content:
-              "---\nname: release-notes-sherpa\ndescription: Draft release notes from commits and changelogs.\n---\n\nUse this skill to summarize release changes.\n",
-            contentType: "text/markdown",
-          },
-        ],
-      },
-    ];
-    for (const seed of seeds) {
+    for (const seed of seedPackageInputs) {
       void this.publishPackage(seed, seedOwner);
     }
   }
 }
+
+export const seedOwner: AuthPrincipal = {
+  id: "seed-openkova",
+  handle: "openkova",
+  email: "seed@kovahub.local",
+};
+
+export const seedPackageInputs: PublishPackageInput[] = [
+  {
+    name: "@openkova/context-bridge",
+    displayName: "Context Bridge",
+    family: "code-plugin",
+    version: "0.1.0",
+    summary: "Gateway-side context extension for Kova and OpenClaw agents.",
+    changelog: "Initial public KovaHub seed.",
+    channel: "official",
+    tags: ["context", "gateway"],
+    compatibility: {
+      pluginApi: "^1.0.0",
+      minGatewayVersion: "2026.3.0",
+      builtWithOpenClawVersion: "2026.3.0",
+    },
+    capabilities: {
+      executesCode: true,
+      runtimeId: "@openkova/context-bridge",
+      providers: ["context"],
+      capabilityTags: ["provider:context", "requires:gateway"],
+    },
+    files: [
+      {
+        path: "package.json",
+        content: JSON.stringify(
+          {
+            name: "@openkova/context-bridge",
+            version: "0.1.0",
+            openclaw: {
+              compat: {
+                pluginApi: "^1.0.0",
+                minGatewayVersion: "2026.3.0",
+              },
+            },
+          },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      },
+      {
+        path: "README.md",
+        content: "# Context Bridge\n\nGateway-side context extension seed package.\n",
+        contentType: "text/markdown",
+      },
+    ],
+  },
+  {
+    name: "release-notes-sherpa",
+    displayName: "Release Notes Sherpa",
+    family: "skill",
+    version: "1.0.0",
+    summary: "Turns changelogs and commit ranges into concise release notes.",
+    changelog: "Initial skill seed.",
+    channel: "community",
+    tags: ["docs", "release-notes"],
+    files: [
+      {
+        path: "SKILL.md",
+        content:
+          "---\nname: release-notes-sherpa\ndescription: Draft release notes from commits and changelogs.\n---\n\nUse this skill to summarize release changes.\n",
+        contentType: "text/markdown",
+      },
+    ],
+  },
+];

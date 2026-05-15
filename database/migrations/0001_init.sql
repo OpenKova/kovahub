@@ -1,15 +1,32 @@
 create extension if not exists pgcrypto;
 
-create type package_family as enum ('skill', 'code-plugin', 'bundle-plugin');
-create type package_channel as enum ('official', 'community', 'private');
-create type verification_tier as enum (
-  'structural',
-  'source-linked',
-  'provenance-verified',
-  'rebuild-verified'
-);
+do $$
+begin
+  create type package_family as enum ('skill', 'code-plugin', 'bundle-plugin');
+exception
+  when duplicate_object then null;
+end $$;
 
-create table users (
+do $$
+begin
+  create type package_channel as enum ('official', 'community', 'private');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  create type verification_tier as enum (
+    'structural',
+    'source-linked',
+    'provenance-verified',
+    'rebuild-verified'
+  );
+exception
+  when duplicate_object then null;
+end $$;
+
+create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   handle text not null unique,
   email text not null unique,
@@ -20,7 +37,7 @@ create table users (
   updated_at timestamptz not null default now()
 );
 
-create table packages (
+create table if not exists packages (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   display_name text not null,
@@ -39,7 +56,7 @@ create table packages (
   updated_at timestamptz not null default now()
 );
 
-create table package_versions (
+create table if not exists package_versions (
   id uuid primary key default gen_random_uuid(),
   package_id uuid not null references packages(id) on delete cascade,
   version text not null,
@@ -54,7 +71,7 @@ create table package_versions (
   unique (package_id, version)
 );
 
-create table package_files (
+create table if not exists package_files (
   id uuid primary key default gen_random_uuid(),
   package_version_id uuid not null references package_versions(id) on delete cascade,
   path text not null,
@@ -64,7 +81,7 @@ create table package_files (
   unique (package_version_id, path)
 );
 
-create table api_tokens (
+create table if not exists api_tokens (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   name text not null,
@@ -73,9 +90,9 @@ create table api_tokens (
   created_at timestamptz not null default now()
 );
 
-create index packages_family_updated_idx on packages (family, updated_at desc);
-create index packages_owner_idx on packages (owner_id);
-create index package_versions_package_created_idx on package_versions (package_id, created_at desc);
-create index packages_search_idx on packages using gin (
+create index if not exists packages_family_updated_idx on packages (family, updated_at desc);
+create index if not exists packages_owner_idx on packages (owner_id);
+create index if not exists package_versions_package_created_idx on package_versions (package_id, created_at desc);
+create index if not exists packages_search_idx on packages using gin (
   to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(display_name, '') || ' ' || coalesce(summary, ''))
 );

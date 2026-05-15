@@ -2,11 +2,11 @@
 
 KovaHub is a fresh Kova/OpenClaw-compatible marketplace for publishing and installing plugins, bundle plugins, and skills.
 
-The MVP scaffold is intentionally small: a TypeScript backend exposes ClawHub-compatible registry routes, a React/Vite frontend provides the marketplace UI, and `database/` contains the Postgres target schema for the first persistent implementation.
+The MVP scaffold is intentionally small: a TypeScript backend exposes ClawHub-compatible registry routes, a React/Vite frontend provides the marketplace UI, and `database/` contains the Postgres schema used by the persistent backend mode.
 
 ## Stack
 
-- `backend/`: Fastify, Zod, JWT auth, in-memory development repository, ZIP archive generation.
+- `backend/`: Fastify, Zod, JWT auth, in-memory development repository, optional Postgres persistence, local archive storage, ZIP archive generation.
 - `frontend/`: React, Vite, lucide icons, ClawHub-inspired dark marketplace UI.
 - `database/`: Postgres DDL for users, packages, versions, files, and API tokens.
 - Package manager: `pnpm`.
@@ -23,6 +23,16 @@ Default local URLs:
 
 - Frontend: `http://localhost:5173`
 - Registry API: `http://localhost:8787`
+
+The backend defaults to the in-memory repository so the app starts with no services installed. To run the persistent mode, provide `DATABASE_URL`; migrations run automatically and package archives are written under `KOVAHUB_ARCHIVE_DIR`:
+
+```bash
+export DATABASE_URL=postgres://postgres:postgres@localhost:5432/kovahub
+export KOVAHUB_ARCHIVE_DIR=.kovahub/archives
+pnpm dev:backend
+```
+
+Set `KOVAHUB_SEED_DATABASE=false` to skip the seed packages in a persistent database.
 
 For local Kova/OpenClaw testing:
 
@@ -52,6 +62,8 @@ Implemented in the scaffold:
 
 - Account registration, login, and bearer-token auth.
 - Publish package endpoint for `skill`, `code-plugin`, and `bundle-plugin`.
+- Optional Postgres persistence for users, packages, versions, files, and package stats.
+- Durable local archive storage for persistent mode.
 - Package list/search.
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
@@ -83,16 +95,15 @@ Auth and publish routes:
 
 ## Next MVP Steps
 
-1. Replace the in-memory repository with Postgres persistence using `database/migrations/0001_init.sql`.
-2. Add durable archive storage under local filesystem/S3-compatible storage.
-3. Add API token auth for CLI publishing.
-4. Add multipart archive publishing and server-side package inspection.
-5. Validate plugin package metadata from `package.json`:
+1. Add API token auth for CLI publishing.
+2. Add multipart archive publishing and server-side package inspection.
+3. Validate plugin package metadata from `package.json`:
    - `openclaw.compat.pluginApi`
    - `openclaw.compat.minGatewayVersion`
    - `openclaw.build.openclawVersion`
-6. Add moderation/security scan placeholders before packages become public.
-7. Add pagination, tags, owner pages, and version history to the frontend.
+4. Add S3/R2-compatible archive storage for hosted deployments.
+5. Add moderation/security scan placeholders before packages become public.
+6. Add pagination, tags, owner pages, and version history to the frontend.
 
 ## References
 
