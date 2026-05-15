@@ -47,6 +47,7 @@ import {
   getApiBase,
   getStoredToken,
   githubLoginUrl,
+  isAuthError,
   packageDownloadUrl,
   postPackageComment,
   publishArchivePackage,
@@ -180,11 +181,17 @@ function useLandingUser() {
         setUserState(result.user);
         setHasSession(true);
       })
-      .catch(() => {
-        clearToken();
+      .catch((err) => {
+        if (isAuthError(err)) {
+          clearToken();
+          if (!active) return;
+          setUserState(null);
+          setHasSession(false);
+          return;
+        }
         if (!active) return;
         setUserState(null);
-        setHasSession(false);
+        setHasSession(Boolean(getStoredToken()));
       });
     return () => {
       active = false;
@@ -2746,7 +2753,9 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
     if (!getStoredToken()) return;
     fetchMe()
       .then((result) => setUser(result.user))
-      .catch(() => clearToken());
+      .catch((err) => {
+        if (isAuthError(err)) clearToken();
+      });
   }, []);
 
   useEffect(() => {

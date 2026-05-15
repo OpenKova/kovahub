@@ -2,7 +2,13 @@ import { createHash, randomBytes } from "node:crypto";
 import fastifyJwt from "@fastify/jwt";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { ApiTokenRecord, AuthPrincipal, RegistryRepository, UserAccount } from "./repository.js";
+import type {
+  ApiTokenRecord,
+  AuthPrincipal,
+  RegistryRepository,
+  SessionPrincipal,
+  UserAccount,
+} from "./repository.js";
 
 const apiTokenSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -93,6 +99,22 @@ function publicUser(user: AuthPrincipal | UserAccount) {
     company: account?.company ?? null,
     location: account?.location ?? null,
     createdAt: account?.createdAt ?? null,
+  };
+}
+
+function sessionPrincipal(user: UserAccount): SessionPrincipal {
+  return {
+    id: user.id,
+    handle: user.handle,
+    email: user.email,
+    githubId: user.githubId ?? null,
+    displayName: user.displayName ?? null,
+    imageUrl: user.imageUrl ?? null,
+    bio: user.bio ?? null,
+    websiteUrl: user.websiteUrl ?? null,
+    company: user.company ?? null,
+    location: user.location ?? null,
+    createdAt: user.createdAt,
   };
 }
 
@@ -273,10 +295,16 @@ function bearerToken(request: FastifyRequest) {
 
 async function verifyJwtPrincipal(request: FastifyRequest) {
   try {
-    return await request.jwtVerify<AuthPrincipal>();
+    return await request.jwtVerify<SessionPrincipal>();
   } catch {
     return null;
   }
+}
+
+async function resolveSessionPrincipal(user: SessionPrincipal, repo: RegistryRepository) {
+  const account = await repo.findUserById(user.id);
+  if (account) return account;
+  return repo.restoreSessionUser ? repo.restoreSessionUser(user) : null;
 }
 
 async function requireSessionAuth(
@@ -286,7 +314,7 @@ async function requireSessionAuth(
 ): Promise<AuthPrincipal | null> {
   const user = await verifyJwtPrincipal(request);
   if (user) {
-    const account = await repo.findUserById(user.id);
+    const account = await resolveSessionPrincipal(user, repo);
     if (account) return { id: account.id, handle: account.handle, email: account.email };
     reply.code(401).send({ error: "Session expired. Sign in with GitHub again." });
     return null;
@@ -302,7 +330,7 @@ export async function requireAuth(
 ): Promise<AuthPrincipal | null> {
   const jwtUser = await verifyJwtPrincipal(request);
   if (jwtUser) {
-    const account = await repo.findUserById(jwtUser.id);
+    const account = await resolveSessionPrincipal(jwtUser, repo);
     if (account) return { id: account.id, handle: account.handle, email: account.email };
     reply.code(401).send({ error: "Session expired. Sign in with GitHub again." });
     return null;
@@ -378,7 +406,7 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
       const accessToken = await fetchGitHubAccessToken(parsed.data.code, config);
       const profile = await fetchGitHubProfile(accessToken);
       const user = await repo.findOrCreateGitHubUser(profile);
-      const token = app.jwt.sign(publicUser(user), { sub: user.id });
+      const token = app.jwt.sign(sessionPrincipal(user), { sub: user.id });
       return redirectToFrontendAuthCallback(reply, { token, returnTo });
     } catch (error) {
       const message = error instanceof Error ? error.message : "GitHub sign-in failed.";

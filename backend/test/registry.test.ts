@@ -595,6 +595,35 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("restores GitHub browser sessions after an in-memory dev restart", async () => {
+    const app = await buildServer();
+    const jwt = await signInWithGitHub(app);
+    await app.close();
+
+    const restarted = await buildServer();
+    const me = await restarted.inject({
+      method: "GET",
+      url: "/api/v1/auth/me",
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().user).toMatchObject({
+      handle: "tester",
+      email: "tester@example.com",
+      displayName: "Tester",
+    });
+
+    const tokens = await restarted.inject({
+      method: "POST",
+      url: "/api/v1/auth/tokens",
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { name: "local cli" },
+    });
+    expect(tokens.statusCode).toBe(201);
+    expect(tokens.json().token).toMatch(/^khp_/);
+    await restarted.close();
+  });
+
   it("rejects stale browser sessions without a 500", async () => {
     const app = await buildServer();
     const staleJwt = app.jwt.sign(

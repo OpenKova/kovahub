@@ -17,6 +17,20 @@ import type {
 const apiBase = (import.meta.env.VITE_KOVAHUB_API_URL || "http://localhost:8787").replace(/\/+$/, "");
 const tokenKey = "kovahub.authToken";
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isAuthError(error: unknown) {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
 export function getApiBase() {
   return apiBase;
 }
@@ -46,7 +60,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     const fallback = `Request failed with HTTP ${response.status}`;
     const body = (await response.json().catch(() => ({ error: fallback }))) as { error?: string };
-    throw new Error(body.error ?? fallback);
+    throw new ApiError(body.error ?? fallback, response.status);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;

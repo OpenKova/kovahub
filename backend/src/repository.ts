@@ -34,6 +34,17 @@ export type UserAccount = AuthPrincipal & {
   createdAt: number;
 };
 
+export type SessionPrincipal = AuthPrincipal & {
+  githubId?: string | null;
+  displayName?: string | null;
+  imageUrl?: string | null;
+  bio?: string | null;
+  websiteUrl?: string | null;
+  company?: string | null;
+  location?: string | null;
+  createdAt?: number | null;
+};
+
 export type UserProfileUpdate = {
   displayName?: string | null;
   imageUrl?: string | null;
@@ -106,6 +117,7 @@ export type RegistryRepository = {
   findUserByEmail(email: string): Promise<UserAccount | null>;
   findUserByHandle(handle: string): Promise<UserAccount | null>;
   findUserById(id: string): Promise<UserAccount | null>;
+  restoreSessionUser?(input: SessionPrincipal): Promise<UserAccount | null>;
   updateUserProfile(userId: string, input: UserProfileUpdate): Promise<UserAccount>;
   createApiToken(input: { userId: string; name: string; tokenHash: string }): Promise<ApiTokenRecord>;
   listApiTokens(userId: string): Promise<ApiTokenRecord[]>;
@@ -447,6 +459,40 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       company: null,
       location: null,
       createdAt: now(),
+    };
+    this.users.set(user.id, user);
+    this.usersByEmail.set(user.email, user.id);
+    this.usersByHandle.set(user.handle, user.id);
+    this.usersByGithubId.set(input.githubId, user.id);
+    return user;
+  }
+
+  async restoreSessionUser(input: SessionPrincipal) {
+    if (!input.githubId) return null;
+    const existingById = this.users.get(input.id);
+    if (existingById) return existingById;
+
+    const existingGithubUserId = this.usersByGithubId.get(input.githubId);
+    const existingGithubUser = existingGithubUserId ? this.users.get(existingGithubUserId) : null;
+    if (existingGithubUser) return existingGithubUser;
+
+    const email = normalizeKey(input.email);
+    const handle = normalizeHandle(input.handle);
+    if (this.usersByEmail.has(email) || this.usersByHandle.has(handle)) return null;
+
+    const user: UserAccount = {
+      id: input.id,
+      handle,
+      email,
+      passwordHash: `github-oauth:${input.githubId}`,
+      githubId: input.githubId,
+      displayName: input.displayName ?? null,
+      imageUrl: input.imageUrl ?? null,
+      bio: input.bio ?? null,
+      websiteUrl: input.websiteUrl ?? null,
+      company: input.company ?? null,
+      location: input.location ?? null,
+      createdAt: typeof input.createdAt === "number" ? input.createdAt : now(),
     };
     this.users.set(user.id, user);
     this.usersByEmail.set(user.email, user.id);
