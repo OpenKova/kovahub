@@ -66,9 +66,11 @@ Implemented in the scaffold:
 - Optional Postgres persistence for users, packages, versions, files, and package stats.
 - Durable local archive storage for persistent mode.
 - Package list/search.
+- Package detail page with compatibility, capability signals, stats, and version history.
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
 - ZIP archive download endpoints.
+- Frontend compose publishing, archive ZIP publishing, and API token management.
 - Plugin compatibility metadata:
   - publish accepts `compatibility.pluginApi`
   - registry responses expose `compatibility.pluginApiRange`
@@ -128,12 +130,12 @@ For Kova plugin archives, `package.json` must declare:
 
 Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MAX_ARCHIVE_ENTRIES`, and `KOVAHUB_MAX_EXTRACTED_BYTES`.
 
-## Next MVP Steps
+## Remaining Hardening
 
-1. Add frontend file upload controls for archive publishing.
-2. Add S3/R2-compatible archive storage for hosted deployments.
-3. Add moderation/security scan placeholders before packages become public.
-4. Add pagination, tags, owner pages, and version history to the frontend.
+1. Add S3/R2-compatible archive storage for hosted deployments.
+2. Add moderation/security scan placeholders before packages become public.
+3. Add pagination, tag pages, owner pages, and richer package discovery.
+4. Add compatibility smoke tests against the local Kova reference contracts.
 
 ## References
 
