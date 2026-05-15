@@ -103,6 +103,7 @@ button {
 .package-icon {
   display: inline-grid;
   place-items: center;
+  overflow: hidden;
   border: 1px solid rgba(220, 38, 38, 0.55);
   background: var(--accent-soft);
   color: #fff;
@@ -112,6 +113,13 @@ button {
   width: 34px;
   height: 34px;
   border-radius: 8px;
+}
+
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .nav-links {

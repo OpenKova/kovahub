@@ -27,6 +27,7 @@ import {
   register,
   storeToken,
 } from "./api";
+import { kovaRoboLogo } from "./brandAssets";
 import type { AuthUser, PackageDetail, PackageFamily, PackageListItem, PublishPayload } from "./types";
 
 const familyLabels: Record<PackageFamily, string> = {
@@ -63,7 +64,7 @@ function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => v
       <div className="navbar-inner">
         <Link className="brand" to="/">
           <span className="brand-mark">
-            <Plug size={17} aria-hidden="true" />
+            <img className="brand-logo" src={kovaRoboLogo} alt="" aria-hidden="true" />
           </span>
           <span>KovaHub</span>
         </Link>
