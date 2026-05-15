@@ -1,0 +1,455 @@
+import { createHash } from "node:crypto";
+import { strToU8, zipSync } from "fflate";
+import {
+  normalizeCompatibility,
+  toPackageListItem,
+  type PackageCapabilitySummary,
+  type PackageChannel,
+  type PackageCompatibility,
+  type PackageFamily,
+  type PackageFile,
+  type PackageListItem,
+  type PackageRecord,
+  type PackageVersionRecord,
+  type PublishPackageInput,
+} from "./contracts.js";
+
+export type AuthPrincipal = {
+  id: string;
+  handle: string;
+  email: string;
+};
+
+export type UserAccount = AuthPrincipal & {
+  passwordHash: string;
+  createdAt: number;
+};
+
+export type ListPackagesOptions = {
+  q?: string;
+  family?: PackageFamily;
+  limit?: number;
+  cursor?: string;
+};
+
+export type RegistryRepository = {
+  createUser(input: { handle: string; email: string; passwordHash: string }): Promise<UserAccount>;
+  findUserByEmail(email: string): Promise<UserAccount | null>;
+  findUserByHandle(handle: string): Promise<UserAccount | null>;
+  findUserById(id: string): Promise<UserAccount | null>;
+  listPackages(options?: ListPackagesOptions): Promise<{ items: PackageListItem[]; nextCursor: string | null }>;
+  searchPackages(options: { q: string; family?: PackageFamily; limit?: number }): Promise<Array<{ score: number; package: PackageListItem }>>;
+  getPackage(name: string): Promise<PackageRecord | null>;
+  getPackageVersion(name: string, version: string): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
+  publishPackage(input: PublishPackageInput, owner: AuthPrincipal): Promise<PackageRecord>;
+  getArchive(name: string, selector?: { version?: string; tag?: string }): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
+  recordDownload(name: string): Promise<void>;
+};
+
+type ArchiveFileInput = {
+  path: string;
+  content?: string;
+  contentBase64?: string;
+  contentType?: string;
+};
+
+function now() {
+  return Date.now();
+}
+
+function newId(prefix: string) {
+  return `${prefix}_${createHash("sha256").update(`${prefix}:${now()}:${Math.random()}`).digest("hex").slice(0, 24)}`;
+}
+
+function sha256Hex(bytes: Uint8Array | Buffer) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function normalizeKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function fileBytes(input: ArchiveFileInput) {
+  if (input.contentBase64) return Buffer.from(input.contentBase64, "base64");
+  return Buffer.from(input.content ?? "", "utf8");
+}
+
+function buildArchive(files: ArchiveFileInput[]) {
+  const entries: Record<string, Uint8Array> = {};
+  for (const file of files) {
+    entries[file.path] = fileBytes(file);
+  }
+  return Buffer.from(zipSync(entries, { level: 6 }));
+}
+
+function buildFileMetadata(files: ArchiveFileInput[]): PackageFile[] {
+  return files.map((file) => {
+    const bytes = fileBytes(file);
+    return {
+      path: file.path,
+      size: bytes.byteLength,
+      sha256: sha256Hex(bytes),
+      contentType: file.contentType,
+    };
+  });
+}
+
+function packageMatches(pkg: PackageRecord, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q || q === "*") return true;
+  return [
+    pkg.name,
+    pkg.displayName,
+    pkg.summary ?? "",
+    pkg.ownerHandle ?? "",
+    ...(pkg.capabilityTags ?? []),
+  ].some((value) => value.toLowerCase().includes(q));
+}
+
+function scorePackage(pkg: PackageRecord, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q || q === "*") return 1;
+  if (pkg.name.toLowerCase() === q) return 100;
+  if (pkg.name.toLowerCase().includes(q)) return 80;
+  if (pkg.displayName.toLowerCase().includes(q)) return 60;
+  if ((pkg.summary ?? "").toLowerCase().includes(q)) return 30;
+  return 10;
+}
+
+function defaultFilesFor(input: PublishPackageInput) {
+  if (input.files.length > 0) return input.files;
+  const displayName = input.displayName ?? input.name;
+  const metadata = {
+    name: input.name,
+    version: input.version,
+    family: input.family,
+    openclaw: {
+      compat: input.compatibility
+        ? {
+            pluginApi: input.compatibility.pluginApi ?? input.compatibility.pluginApiRange,
+            minGatewayVersion: input.compatibility.minGatewayVersion,
+          }
+        : undefined,
+    },
+  };
+  return [
+    {
+      path: "README.md",
+      content: `# ${displayName}\n\n${input.summary ?? "KovaHub package."}\n`,
+      contentType: "text/markdown",
+    },
+    {
+      path: "package.json",
+      content: `${JSON.stringify(metadata, null, 2)}\n`,
+      contentType: "application/json",
+    },
+  ];
+}
+
+function normalizeCapabilities(
+  input: PublishPackageInput,
+  compatibility: PackageCompatibility | null,
+): PackageCapabilitySummary | null {
+  const base = input.capabilities;
+  if (!base && input.family === "skill") return null;
+  const executesCode = input.family === "code-plugin" || Boolean(base?.executesCode);
+  const capabilityTags = [
+    ...(base?.capabilityTags ?? []),
+    input.family === "code-plugin" ? "plugin:code" : undefined,
+    input.family === "bundle-plugin" ? "plugin:bundle" : undefined,
+    input.family === "skill" ? "skill" : undefined,
+    compatibility?.minGatewayVersion ? "compat:gateway-min" : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return {
+    executesCode,
+    runtimeId: base?.runtimeId ?? (input.family === "code-plugin" ? input.name : undefined),
+    pluginKind: base?.pluginKind,
+    channels: base?.channels,
+    providers: base?.providers,
+    hooks: base?.hooks,
+    bundledSkills: base?.bundledSkills,
+    capabilityTags,
+    bundleFormat: base?.bundleFormat,
+    hostTargets: base?.hostTargets,
+  };
+}
+
+function createPackageVersion(input: {
+  payload: PublishPackageInput;
+  compatibility: PackageCompatibility | null;
+  capabilities: PackageCapabilitySummary | null;
+}): PackageVersionRecord {
+  const sourceFiles = defaultFilesFor(input.payload);
+  const archive = input.payload.archiveBase64
+    ? Buffer.from(input.payload.archiveBase64, "base64")
+    : buildArchive(sourceFiles);
+  return {
+    version: input.payload.version,
+    createdAt: now(),
+    changelog: input.payload.changelog,
+    distTags: ["latest"],
+    files: buildFileMetadata(sourceFiles),
+    sha256hash: sha256Hex(archive),
+    compatibility: input.compatibility,
+    capabilities: input.capabilities,
+    verification: {
+      tier: "structural",
+      scope: "artifact-only",
+      summary: "MVP structural validation only.",
+      scanStatus: "not-run",
+    },
+    archive,
+  };
+}
+
+export class InMemoryRegistryRepository implements RegistryRepository {
+  private readonly users = new Map<string, UserAccount>();
+  private readonly usersByEmail = new Map<string, string>();
+  private readonly usersByHandle = new Map<string, string>();
+  private readonly packages = new Map<string, PackageRecord>();
+
+  constructor() {
+    this.seedPackages();
+  }
+
+  async createUser(input: {
+    handle: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<UserAccount> {
+    const email = normalizeKey(input.email);
+    const handle = normalizeKey(input.handle);
+    if (this.usersByEmail.has(email)) throw new Error("Email is already registered.");
+    if (this.usersByHandle.has(handle)) throw new Error("Handle is already registered.");
+    const user: UserAccount = {
+      id: newId("user"),
+      handle,
+      email,
+      passwordHash: input.passwordHash,
+      createdAt: now(),
+    };
+    this.users.set(user.id, user);
+    this.usersByEmail.set(email, user.id);
+    this.usersByHandle.set(handle, user.id);
+    return user;
+  }
+
+  async findUserByEmail(email: string) {
+    const id = this.usersByEmail.get(normalizeKey(email));
+    return id ? (this.users.get(id) ?? null) : null;
+  }
+
+  async findUserByHandle(handle: string) {
+    const id = this.usersByHandle.get(normalizeKey(handle));
+    return id ? (this.users.get(id) ?? null) : null;
+  }
+
+  async findUserById(id: string) {
+    return this.users.get(id) ?? null;
+  }
+
+  async listPackages(options: ListPackagesOptions = {}) {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const filtered = this.sortedPackages().filter((pkg) => {
+      if (options.family && pkg.family !== options.family) return false;
+      if (options.q && !packageMatches(pkg, options.q)) return false;
+      return true;
+    });
+    const page = filtered.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      items: page.map(toPackageListItem),
+      nextCursor: nextOffset < filtered.length ? String(nextOffset) : null,
+    };
+  }
+
+  async searchPackages(options: { q: string; family?: PackageFamily; limit?: number }) {
+    const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+    return this.sortedPackages()
+      .filter((pkg) => (!options.family || pkg.family === options.family) && packageMatches(pkg, options.q))
+      .map((pkg) => ({ score: scorePackage(pkg, options.q), package: toPackageListItem(pkg) }))
+      .sort((left, right) => right.score - left.score || right.package.updatedAt - left.package.updatedAt)
+      .slice(0, limit);
+  }
+
+  async getPackage(name: string) {
+    return this.packages.get(normalizeKey(name)) ?? null;
+  }
+
+  async getPackageVersion(name: string, version: string) {
+    const pkg = await this.getPackage(name);
+    const found = pkg?.versions.find((candidate) => candidate.version === version);
+    return pkg && found ? { pkg, version: found } : null;
+  }
+
+  async publishPackage(input: PublishPackageInput, owner: AuthPrincipal) {
+    const compatibility = normalizeCompatibility(input.compatibility);
+    if (input.family !== "skill") {
+      if (!compatibility?.pluginApiRange) {
+        throw new Error("Plugin packages require compatibility.pluginApi or compatibility.pluginApiRange.");
+      }
+      if (!compatibility.minGatewayVersion) {
+        throw new Error("Plugin packages require compatibility.minGatewayVersion.");
+      }
+    }
+    const capabilities = normalizeCapabilities(input, compatibility);
+    const key = normalizeKey(input.name);
+    const version = createPackageVersion({ payload: input, compatibility, capabilities });
+    const existing = this.packages.get(key);
+
+    if (existing) {
+      if (existing.versions.some((candidate) => candidate.version === input.version)) {
+        throw new Error(`Version ${input.version} already exists for ${input.name}.`);
+      }
+      for (const candidate of existing.versions) {
+        candidate.distTags = candidate.distTags.filter((tag) => tag !== "latest");
+      }
+      existing.versions.unshift(version);
+      existing.latestVersion = version.version;
+      existing.updatedAt = version.createdAt;
+      existing.tags = { ...existing.tags, latest: version.version };
+      existing.compatibility = compatibility;
+      existing.capabilities = capabilities;
+      existing.capabilityTags = capabilities?.capabilityTags;
+      existing.executesCode = capabilities?.executesCode;
+      existing.stats.versions = existing.versions.length;
+      return existing;
+    }
+
+    const record: PackageRecord = {
+      name: input.name,
+      displayName: input.displayName ?? input.name,
+      family: input.family,
+      runtimeId: capabilities?.runtimeId ?? null,
+      channel: input.channel as PackageChannel,
+      isOfficial: input.channel === "official",
+      summary: input.summary ?? null,
+      ownerHandle: input.ownerHandle ?? owner.handle,
+      createdAt: version.createdAt,
+      updatedAt: version.createdAt,
+      latestVersion: version.version,
+      capabilityTags: capabilities?.capabilityTags,
+      executesCode: capabilities?.executesCode,
+      verificationTier: version.verification?.tier ?? null,
+      tags: { latest: version.version },
+      compatibility,
+      capabilities,
+      verification: version.verification,
+      versions: [version],
+      stats: {
+        downloads: 0,
+        installs: 0,
+        stars: 0,
+        versions: 1,
+      },
+    };
+    this.packages.set(key, record);
+    return record;
+  }
+
+  async getArchive(name: string, selector: { version?: string; tag?: string } = {}) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    const targetVersion =
+      selector.version ??
+      (selector.tag ? pkg.tags[selector.tag] : undefined) ??
+      pkg.latestVersion ??
+      undefined;
+    const version = targetVersion
+      ? pkg.versions.find((candidate) => candidate.version === targetVersion)
+      : pkg.versions[0];
+    return version ? { pkg, version } : null;
+  }
+
+  async recordDownload(name: string) {
+    const pkg = await this.getPackage(name);
+    if (pkg) pkg.stats.downloads += 1;
+  }
+
+  private sortedPackages() {
+    return [...this.packages.values()].sort(
+      (left, right) =>
+        Number(right.isOfficial) - Number(left.isOfficial) ||
+        right.updatedAt - left.updatedAt ||
+        left.displayName.localeCompare(right.displayName),
+    );
+  }
+
+  private seedPackages() {
+    const seedOwner: AuthPrincipal = {
+      id: "seed-openkova",
+      handle: "openkova",
+      email: "seed@kovahub.local",
+    };
+    const seeds: PublishPackageInput[] = [
+      {
+        name: "@openkova/context-bridge",
+        displayName: "Context Bridge",
+        family: "code-plugin",
+        version: "0.1.0",
+        summary: "Gateway-side context extension for Kova and OpenClaw agents.",
+        changelog: "Initial public KovaHub seed.",
+        channel: "official",
+        tags: ["context", "gateway"],
+        compatibility: {
+          pluginApi: "^1.0.0",
+          minGatewayVersion: "2026.3.0",
+          builtWithOpenClawVersion: "2026.3.0",
+        },
+        capabilities: {
+          executesCode: true,
+          runtimeId: "@openkova/context-bridge",
+          providers: ["context"],
+          capabilityTags: ["provider:context", "requires:gateway"],
+        },
+        files: [
+          {
+            path: "package.json",
+            content: JSON.stringify(
+              {
+                name: "@openkova/context-bridge",
+                version: "0.1.0",
+                openclaw: {
+                  compat: {
+                    pluginApi: "^1.0.0",
+                    minGatewayVersion: "2026.3.0",
+                  },
+                },
+              },
+              null,
+              2,
+            ),
+            contentType: "application/json",
+          },
+          {
+            path: "README.md",
+            content: "# Context Bridge\n\nGateway-side context extension seed package.\n",
+            contentType: "text/markdown",
+          },
+        ],
+      },
+      {
+        name: "release-notes-sherpa",
+        displayName: "Release Notes Sherpa",
+        family: "skill",
+        version: "1.0.0",
+        summary: "Turns changelogs and commit ranges into concise release notes.",
+        changelog: "Initial skill seed.",
+        channel: "community",
+        tags: ["docs", "release-notes"],
+        files: [
+          {
+            path: "SKILL.md",
+            content:
+              "---\nname: release-notes-sherpa\ndescription: Draft release notes from commits and changelogs.\n---\n\nUse this skill to summarize release changes.\n",
+            contentType: "text/markdown",
+          },
+        ],
+      },
+    ];
+    for (const seed of seeds) {
+      void this.publishPackage(seed, seedOwner);
+    }
+  }
+}
