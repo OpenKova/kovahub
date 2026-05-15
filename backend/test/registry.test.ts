@@ -842,6 +842,93 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("imports packages from GitHub and restores publisher backups", async () => {
+    const app = await buildServer();
+    const jwt = await signInWithGitHub(app);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/package.json")) {
+        return new Response(
+          JSON.stringify({
+            name: "@tester/github-plugin",
+            version: "0.1.0",
+            description: "Imported from GitHub.",
+            kova: {
+              compat: {
+                pluginApi: "^1.0.0",
+                minGatewayVersion: "2026.3.0",
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/README.md")) {
+        return new Response("# GitHub Plugin\n", { status: 200 });
+      }
+      if (url.endsWith("/SKILL.md")) {
+        return new Response("not found", { status: 404 });
+      }
+      throw new Error(`Unexpected GitHub import fetch: ${url}`);
+    }) as typeof fetch;
+
+    try {
+      const preview = await app.inject({
+        method: "POST",
+        url: "/api/v1/import/github/preview",
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { repoUrl: "OpenKova/github-plugin" },
+      });
+      expect(preview.statusCode).toBe(200);
+      expect(preview.json().package).toMatchObject({
+        name: "@tester/github-plugin",
+        family: "code-plugin",
+        summary: "Imported from GitHub.",
+      });
+
+      const imported = await app.inject({
+        method: "POST",
+        url: "/api/v1/import/github",
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { repoUrl: "OpenKova/github-plugin" },
+      });
+      expect(imported.statusCode).toBe(201);
+      expect(imported.json().package.name).toBe("@tester/github-plugin");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const backup = await app.inject({
+      method: "GET",
+      url: "/api/v1/me/backup",
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(backup.statusCode).toBe(200);
+    expect(backup.json().snapshot.packages).toEqual([
+      expect.objectContaining({
+        name: "@tester/github-plugin",
+        version: "0.1.0",
+        archiveBase64: expect.any(String),
+      }),
+    ]);
+    await app.close();
+
+    const restoreApp = await buildServer();
+    const restoreJwt = await signInWithGitHub(restoreApp);
+    const restored = await restoreApp.inject({
+      method: "POST",
+      url: "/api/v1/me/restore",
+      headers: { authorization: `Bearer ${restoreJwt}` },
+      payload: { packages: backup.json().snapshot.packages },
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().restored).toEqual([
+      expect.objectContaining({ name: "@tester/github-plugin" }),
+    ]);
+    await restoreApp.close();
+  });
+
   it("restores GitHub browser sessions after an in-memory dev restart", async () => {
     const app = await buildServer();
     const jwt = await signInWithGitHub(app);

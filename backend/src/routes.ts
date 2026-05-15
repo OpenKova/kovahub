@@ -97,6 +97,26 @@ const packageTransferSchema = z.object({
 const packageVersionYankSchema = z.object({
   message: z.string().trim().max(500).nullable().optional(),
 });
+const githubImportSchema = z.object({
+  repoUrl: z.string().trim().min(1),
+  ref: z.string().trim().min(1).max(120).default("main"),
+  path: z.string().trim().max(240).default(""),
+  name: z.string().trim().min(1).max(214).optional(),
+  displayName: z.string().trim().min(1).max(120).optional(),
+  family: z.enum(packageFamilies).optional(),
+  version: z.string().trim().optional(),
+  summary: z.string().trim().max(500).optional(),
+  tags: z.array(z.string().trim().min(1).max(48)).optional(),
+  compatibility: z
+    .object({
+      pluginApi: z.string().trim().min(1).optional(),
+      minGatewayVersion: z.string().trim().min(1).optional(),
+    })
+    .optional(),
+});
+const restoreSnapshotSchema = z.object({
+  packages: z.array(publishPackageSchema).max(100),
+});
 const downloadQuerySchema = z.object({
   version: z.string().optional(),
   tag: z.string().optional(),
@@ -456,6 +476,86 @@ async function parseMultipartPublishInput(request: FastifyRequest) {
   return preparePublishInputFromArchive({ archive, metadata });
 }
 
+function parseGitHubRepo(value: string) {
+  const trimmed = value.trim();
+  const shorthand = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(trimmed);
+  if (shorthand) return { owner: shorthand[1] as string, repo: shorthand[2] as string };
+  const url = new URL(trimmed);
+  if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
+    throw new Error("Only github.com repositories are supported.");
+  }
+  const [owner, repo] = url.pathname.replace(/^\/+/, "").split("/");
+  if (!owner || !repo) throw new Error("GitHub repository URL must include owner and repo.");
+  return { owner, repo: repo.replace(/\.git$/, "") };
+}
+
+function cleanGitHubPath(value: string | undefined) {
+  const trimmed = value?.trim().replace(/^\/+|\/+$/g, "") ?? "";
+  if (trimmed.includes("..")) throw new Error("GitHub import path cannot contain '..'.");
+  return trimmed;
+}
+
+function rawGitHubUrl(params: { owner: string; repo: string; ref: string; path: string }) {
+  const filePath = cleanGitHubPath(params.path);
+  const encodedPath = filePath
+    ? filePath
+        .split("/")
+        .map((part) => encodeURIComponent(part))
+        .join("/")
+    : "";
+  return `https://raw.githubusercontent.com/${encodeURIComponent(params.owner)}/${encodeURIComponent(params.repo)}/${encodeURIComponent(params.ref)}/${encodedPath}`;
+}
+
+async function fetchGitHubText(params: { owner: string; repo: string; ref: string; basePath: string; file: string }) {
+  const pathPrefix = cleanGitHubPath(params.basePath);
+  const filePath = pathPrefix ? `${pathPrefix}/${params.file}` : params.file;
+  const response = await fetch(rawGitHubUrl({ owner: params.owner, repo: params.repo, ref: params.ref, path: filePath }), {
+    headers: { "user-agent": "KovaHub" },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`GitHub fetch failed for ${params.file}: HTTP ${response.status}.`);
+  return response.text();
+}
+
+async function buildGitHubImportPayload(input: z.infer<typeof githubImportSchema>) {
+  const repo = parseGitHubRepo(input.repoUrl);
+  const [packageJsonText, readmeText, skillText] = await Promise.all([
+    fetchGitHubText({ ...repo, ref: input.ref, basePath: input.path, file: "package.json" }),
+    fetchGitHubText({ ...repo, ref: input.ref, basePath: input.path, file: "README.md" }),
+    fetchGitHubText({ ...repo, ref: input.ref, basePath: input.path, file: "SKILL.md" }),
+  ]);
+  const packageJson = packageJsonText ? (JSON.parse(packageJsonText) as Record<string, unknown>) : {};
+  const inferredFamily = skillText ? "skill" : "code-plugin";
+  const kova = packageJson.kova && typeof packageJson.kova === "object" ? (packageJson.kova as Record<string, unknown>) : null;
+  const kovaCompat = kova?.compat && typeof kova.compat === "object" ? (kova.compat as Record<string, string>) : null;
+  const family = input.family ?? inferredFamily;
+  const payload = {
+    name: input.name ?? (typeof packageJson.name === "string" ? packageJson.name : repo.repo),
+    displayName: input.displayName ?? (typeof packageJson.displayName === "string" ? packageJson.displayName : undefined),
+    family,
+    version: input.version ?? (typeof packageJson.version === "string" ? packageJson.version : "0.1.0"),
+    summary: input.summary ?? (typeof packageJson.description === "string" ? packageJson.description : undefined),
+    tags: input.tags ?? [],
+    compatibility:
+      family === "skill"
+        ? undefined
+        : {
+            pluginApi: input.compatibility?.pluginApi ?? kovaCompat?.pluginApi,
+            minGatewayVersion: input.compatibility?.minGatewayVersion ?? kovaCompat?.minGatewayVersion,
+          },
+    files: [
+      packageJsonText
+        ? { path: "package.json", content: packageJsonText, contentType: "application/json" }
+        : null,
+      skillText ? { path: "SKILL.md", content: skillText, contentType: "text/markdown" } : null,
+      readmeText ? { path: "README.md", content: readmeText, contentType: "text/markdown" } : null,
+    ].filter((file): file is { path: string; content: string; contentType: string } => Boolean(file)),
+  };
+  const parsed = publishPackageSchema.safeParse(payload);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Imported package metadata is invalid.");
+  return parsed.data;
+}
+
 async function listPackageCatalog(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -752,6 +852,41 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     }
   });
 
+  app.post("/api/v1/import/github/preview", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = githubImportSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid GitHub import payload." };
+    }
+    try {
+      return { package: await buildGitHubImportPayload(parsed.data) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "GitHub import preview failed." };
+    }
+  });
+
+  app.post("/api/v1/import/github", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = githubImportSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid GitHub import payload." };
+    }
+    try {
+      const payload = await buildGitHubImportPayload(parsed.data);
+      const pkg = await repo.publishPackage(payload, user);
+      reply.code(201);
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "GitHub import failed." };
+    }
+  });
+
   app.get("/api/v1/me/packages", async (request, reply) => {
     const user = await requireAuth(request, reply, repo);
     if (!user) return reply;
@@ -766,6 +901,75 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       limit: query.data.limit,
       cursor: query.data.cursor,
     });
+  });
+
+  app.get("/api/v1/me/backup", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const ownerHandles = new Set([user.handle]);
+    for (const organization of await repo.listUserOrganizations(user.id)) ownerHandles.add(organization.handle);
+    const packages: Array<z.infer<typeof publishPackageSchema>> = [];
+    for (const ownerHandle of ownerHandles) {
+      let cursor: string | null = null;
+      do {
+        const page = await repo.listPackages({ owner: ownerHandle, includeDeleted: true, limit: 100, cursor: cursor ?? undefined });
+        for (const item of page.items) {
+          const pkg = await repo.getPackage(item.name);
+          if (!pkg) continue;
+          for (const version of [...pkg.versions].reverse()) {
+            const archive = await repo.getArchive(pkg.name, { version: version.version });
+            if (!archive) continue;
+            packages.push({
+              name: pkg.name,
+              ownerHandle: pkg.ownerHandle ?? undefined,
+              displayName: pkg.displayName,
+              family: pkg.family,
+              version: version.version,
+              summary: pkg.summary ?? undefined,
+              channel: pkg.channel,
+              tags: pkg.topics ?? [],
+              compatibility: version.compatibility
+                ? {
+                    pluginApi: version.compatibility.pluginApiRange,
+                    minGatewayVersion: version.compatibility.minGatewayVersion,
+                  }
+                : undefined,
+              archiveBase64: archive.version.archive.toString("base64"),
+              files: [],
+              changelog: version.changelog,
+            });
+          }
+        }
+        cursor = page.nextCursor;
+      } while (cursor);
+    }
+    return {
+      snapshot: {
+        version: 1,
+        generatedAt: Date.now(),
+        packages,
+      },
+    };
+  });
+
+  app.post("/api/v1/me/restore", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = restoreSnapshotSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid restore snapshot." };
+    }
+    const restored = [];
+    try {
+      for (const entry of parsed.data.packages) {
+        restored.push(toPackageListItem(await repo.publishPackage(entry, user)));
+      }
+      return { restored };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Restore failed.", restored };
+    }
   });
 
   app.patch("/api/v1/packages/:name/settings", async (request, reply) => {
