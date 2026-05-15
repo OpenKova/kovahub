@@ -419,6 +419,14 @@ describe("registry api", () => {
     });
     expect(tokens.statusCode).toBe(200);
     expect(tokens.json().tokens[0].lastUsedAt).toEqual(expect.any(Number));
+
+    const whoami = await app.inject({
+      method: "GET",
+      url: "/api/v1/whoami",
+      headers: { authorization: `Bearer ${apiToken}` },
+    });
+    expect(whoami.statusCode).toBe(200);
+    expect(whoami.json().user.handle).toBe("tester");
     await app.close();
   });
 

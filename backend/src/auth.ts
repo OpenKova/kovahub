@@ -348,6 +348,12 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
     return { user: publicUser(user) };
   });
 
+  app.get("/api/v1/whoami", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    return { user: publicUser(user) };
+  });
+
   app.get("/api/v1/auth/tokens", async (request, reply) => {
     const user = await requireSessionAuth(request, reply);
     if (!user) return reply;

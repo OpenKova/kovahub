@@ -109,6 +109,7 @@ Auth and publish routes:
 - `GET /api/v1/auth/github/start?returnTo=/publish`
 - `GET /api/v1/auth/github/callback`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/whoami`
 - `GET /api/v1/auth/tokens`
 - `POST /api/v1/auth/tokens`
 - `DELETE /api/v1/auth/tokens/:id`
