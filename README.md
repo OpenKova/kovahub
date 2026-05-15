@@ -90,6 +90,8 @@ Implemented in the scaffold:
 
 - GitHub OAuth browser sign-in and bearer-token auth.
 - Public publisher profiles and signed-in profile editing.
+- Authenticated package highlights/starred packages.
+- Publisher dashboard with package activity and token management.
 - API token creation and bearer-token publishing for CLI/client integrations.
 - Publish package endpoint for `skill`, `code-plugin`, and `bundle-plugin`.
 - Multipart ZIP archive publishing with server-side `package.json`/`SKILL.md` inspection.
@@ -101,6 +103,10 @@ Implemented in the scaffold:
 - Discovery sorting by recent, trending, and popular signals.
 - Download, install, and star counters exposed in package stats.
 - Package detail page with compatibility, capability signals, stats, and version history.
+- Package detail tabs for overview, versions, compatibility, files, and discussion.
+- Package comments and authenticated package reports.
+- Unified search page with all/skills/plugins filters.
+- Audit page for security scan and moderation signals.
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
 - ZIP archive download endpoints.
@@ -113,6 +119,27 @@ Implemented in the scaffold:
 - Kova-compatible registry target env docs.
 - Kova client compatibility smoke tests for package, skill, version, and archive routes.
 
+ClawHub-inspired frontend routes now present in KovaHub:
+
+- `/` home
+- `/search`
+- `/skills`
+- `/plugins`
+- `/publishers`
+- `/stars`
+- `/dashboard`
+- `/audits`
+- `/docs`
+- `/marketplace`
+- `/publish`
+- `/skills/publish`
+- `/plugins/publish`
+- `/packages/:name`
+- `/plugins/:name`
+- `/skills/:slug`
+- `/publishers/:handle`
+- `/tags/:tag`
+
 Registry-compatible read routes:
 
 - `GET /.well-known/kovahub.json`
@@ -120,11 +147,17 @@ Registry-compatible read routes:
 - `GET /api/v1/packages/search?q=...&family=...&owner=...&tag=...`
 - `GET /api/v1/packages/trending`
 - `GET /api/v1/packages/:name`
+- `GET /api/v1/packages/:name/comments`
+- `GET /api/v1/packages/:name/star`
 - `GET /api/v1/packages/:name/versions`
 - `GET /api/v1/packages/:name/versions/:version`
 - `GET /api/v1/packages/:name/download?version=...`
 - `POST /api/v1/packages/:name/install`
 - `POST /api/v1/packages/:name/star`
+- `POST /api/v1/packages/:name/star/toggle`
+- `POST /api/v1/packages/:name/comments`
+- `POST /api/v1/packages/:name/report`
+- `GET /api/v1/stars`
 - `GET /api/v1/profiles/:handle`
 - `GET /api/v1/publishers/:handle/packages`
 - `GET /api/v1/tags/:tag/packages`
@@ -186,8 +219,15 @@ Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MA
 
 ## Remaining Hardening
 
-1. Add user-specific saved/starred package state.
-2. Replace placeholder moderation/security status with real scanner integrations and reviewer workflows.
+KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, and compatibility surfaces. Remaining ClawHub parity work is:
+
+1. Replace placeholder moderation/security status with real scanner integrations and reviewer workflows.
+2. Add owner package settings: soft-delete/restore, rename, transfer, and merge flows.
+3. Add organization/publisher teams beyond the current user-profile publisher model.
+4. Add device-code auth and a first-party KovaHub CLI package.
+5. Add GitHub import/backup/restore flows.
+6. Add semantic/vector search and richer package README rendering from archive contents.
+7. Add OpenAPI publishing and CI/security workflow parity.
 
 ## References
 
