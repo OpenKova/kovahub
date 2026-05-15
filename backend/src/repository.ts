@@ -174,12 +174,16 @@ export function normalizeCapabilities(
   if (!base && input.family === "skill") return null;
   const executesCode = input.family === "code-plugin" || Boolean(base?.executesCode);
   const capabilityTags = [
-    ...(base?.capabilityTags ?? []),
-    input.family === "code-plugin" ? "plugin:code" : undefined,
-    input.family === "bundle-plugin" ? "plugin:bundle" : undefined,
-    input.family === "skill" ? "skill" : undefined,
-    compatibility?.minGatewayVersion ? "compat:gateway-min" : undefined,
-  ].filter((value): value is string => Boolean(value));
+    ...new Set(
+      [
+        ...(base?.capabilityTags ?? []),
+        input.family === "code-plugin" ? "plugin:code" : undefined,
+        input.family === "bundle-plugin" ? "plugin:bundle" : undefined,
+        input.family === "skill" ? "skill" : undefined,
+        compatibility?.minGatewayVersion ? "compat:gateway-min" : undefined,
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  ];
   return {
     executesCode,
     runtimeId: base?.runtimeId ?? (input.family === "code-plugin" ? input.name : undefined),

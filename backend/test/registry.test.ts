@@ -237,6 +237,11 @@ describe("registry api", () => {
         pluginSdkVersion: "1.0.0",
       },
     });
+    expect(publish.json().package.capabilities.capabilityTags).toEqual([
+      "plugin:code",
+      "source:archive",
+      "compat:gateway-min",
+    ]);
 
     const version = await app.inject("/api/v1/packages/%40tester%2Farchive-plugin/versions/0.2.0");
     expect(version.statusCode).toBe(200);
