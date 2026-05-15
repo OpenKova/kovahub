@@ -1,10 +1,13 @@
 import type {
   AuthUser,
   ApiTokenSummary,
+  PackageComment,
   PackageDetail,
   PackageFamily,
   PackageListItem,
   PackageSort,
+  PackageStarState,
+  PackageStarToggleResult,
   ProfileUpdatePayload,
   PublishArchiveMetadata,
   PublishPayload,
@@ -75,6 +78,46 @@ export async function fetchPackages(params: FetchPackagesParams = {}) {
 
 export async function fetchPackageDetail(name: string) {
   return request<PackageDetail>(`/api/v1/packages/${encodeURIComponent(name)}`);
+}
+
+export async function fetchStarredPackages(params: { cursor?: string | null; limit?: number } = {}) {
+  const query = new URLSearchParams();
+  if (params.cursor) query.set("cursor", params.cursor);
+  query.set("limit", String(params.limit ?? 100));
+  return request<{ items: PackageListItem[]; nextCursor: string | null }>(`/api/v1/stars?${query.toString()}`);
+}
+
+export async function fetchPackageStar(name: string) {
+  return request<PackageStarState>(`/api/v1/packages/${encodeURIComponent(name)}/star`);
+}
+
+export async function togglePackageStar(name: string) {
+  return request<PackageStarToggleResult>(`/api/v1/packages/${encodeURIComponent(name)}/star/toggle`, {
+    method: "POST",
+  });
+}
+
+export async function fetchPackageComments(name: string) {
+  return request<{ items: PackageComment[]; nextCursor: string | null }>(
+    `/api/v1/packages/${encodeURIComponent(name)}/comments?limit=100`,
+  );
+}
+
+export async function postPackageComment(name: string, body: string) {
+  return request<{ comment: PackageComment | null }>(`/api/v1/packages/${encodeURIComponent(name)}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function reportPackage(name: string, reason: string) {
+  return request<{ report: { id: string; packageName: string; reason: string; createdAt: number } | null }>(
+    `/api/v1/packages/${encodeURIComponent(name)}/report`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
 }
 
 export async function publishPackage(payload: PublishPayload) {

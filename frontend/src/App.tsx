@@ -9,9 +9,13 @@ import {
   Download,
   ExternalLink,
   FileArchive,
+  Flag,
   Github,
   History,
   KeyRound,
+  LayoutDashboard,
+  ListChecks,
+  MessageSquare,
   Monitor,
   Moon,
   Package,
@@ -35,23 +39,30 @@ import {
   createApiToken,
   fetchMe,
   fetchPackageDetail,
+  fetchPackageComments,
+  fetchPackageStar,
   fetchPackages,
   fetchProfile,
+  fetchStarredPackages,
   getApiBase,
   getStoredToken,
   githubLoginUrl,
   packageDownloadUrl,
+  postPackageComment,
   publishArchivePackage,
   publishPackage,
+  reportPackage,
   revokeApiToken,
   listApiTokens,
   storeToken,
+  togglePackageStar,
   updateProfile,
 } from "./api";
 import { kovaRoboLogo } from "./brandAssets";
 import type {
   AuthUser,
   ApiTokenSummary,
+  PackageComment,
   PackageDetail,
   PackageFamily,
   PackageListItem,
@@ -91,6 +102,8 @@ type ThemeSettings = {
   setMode: (mode: ThemeMode) => void;
 };
 type HomeCardKind = "skill" | "plugin";
+type SearchKind = "all" | "skills" | "plugins";
+type DetailTab = "overview" | "versions" | "compatibility" | "files" | "discussion";
 type HomeCardItem = {
   name: string;
   displayName: string;
@@ -240,6 +253,14 @@ function marketplaceRoute(
   return `/marketplace${suffix ? `?${suffix}` : ""}`;
 }
 
+function searchRoute(params: { q?: string; type?: SearchKind } = {}) {
+  const query = new URLSearchParams();
+  if (params.q?.trim()) query.set("q", params.q.trim());
+  if (params.type && params.type !== "all") query.set("type", params.type);
+  const suffix = query.toString();
+  return `/search${suffix ? `?${suffix}` : ""}`;
+}
+
 function publisherRoute(handle: string) {
   return `/publishers/${encodeURIComponent(handle)}`;
 }
@@ -269,7 +290,8 @@ function tagRoute(tag: string) {
 function useRoutePackageName() {
   const params = useParams();
   const wildcard = params["*"];
-  return wildcard ? decodeURIComponent(wildcard) : null;
+  const slug = "slug" in params ? params.slug : null;
+  return wildcard ? decodeURIComponent(wildcard) : slug ? decodeURIComponent(slug) : null;
 }
 
 function parseRouteFamily(value: string | null): PackageFamily | "all" {
@@ -511,6 +533,8 @@ function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => v
         </Link>
         <nav className="nav-links" aria-label="Primary">
           <Link to="/marketplace">Marketplace</Link>
+          <Link to="/search">Search</Link>
+          <Link to="/audits">Audits</Link>
           <a href={`${getApiBase()}/api/v1/meta`}>Registry API</a>
           <Link to="/publish">Publish</Link>
         </nav>
@@ -518,6 +542,12 @@ function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => v
           <div className="user-chip">
             <UserRound size={15} aria-hidden="true" />
             <span>{displayUserName(user)}</span>
+            <Link className="link-button" to="/dashboard">
+              Dashboard
+            </Link>
+            <Link className="link-button" to="/stars">
+              Stars
+            </Link>
             <Link className="link-button" to="/profile">
               Profile
             </Link>
@@ -581,8 +611,68 @@ function PackageRow({ item, active }: { item: PackageListItem; active: boolean }
   );
 }
 
-function DetailPanel({ detail }: { detail: PackageDetail | null }) {
+function DetailPanel({
+  detail,
+  user,
+  onPackageUpdated,
+}: {
+  detail: PackageDetail | null;
+  user: AuthUser | null;
+  onPackageUpdated: (item: PackageListItem) => void;
+}) {
   const pkg = detail?.package;
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const [comments, setComments] = useState<PackageComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentBody, setCommentBody] = useState("");
+  const [starred, setStarred] = useState<boolean | null>(null);
+  const [starBusy, setStarBusy] = useState(false);
+  const [localStats, setLocalStats] = useState(pkg?.stats ?? null);
+  const [detailNotice, setDetailNotice] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+
+  useEffect(() => {
+    setActiveTab("overview");
+    setComments([]);
+    setCommentBody("");
+    setDetailNotice(null);
+    setDetailError(null);
+    setReportOpen(false);
+    setReportReason("");
+    setLocalStats(pkg?.stats ?? null);
+    setStarred(null);
+    if (!pkg) return;
+
+    let active = true;
+    setCommentsLoading(true);
+    fetchPackageComments(pkg.name)
+      .then((page) => {
+        if (active) setComments(page.items);
+      })
+      .catch((error) => {
+        if (active) setDetailError(error instanceof Error ? error.message : "Failed to load comments.");
+      })
+      .finally(() => {
+        if (active) setCommentsLoading(false);
+      });
+
+    if (user) {
+      fetchPackageStar(pkg.name)
+        .then((state) => {
+          if (active) setStarred(state.starred);
+        })
+        .catch(() => {
+          if (active) setStarred(false);
+        });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [pkg?.name, user?.id]);
+
   if (!pkg) {
     return (
       <section className="detail-panel empty-detail">
@@ -599,6 +689,57 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
   const tags = Object.entries(pkg.tags ?? {});
   const topics = topicsFor(pkg);
   const versions = pkg.versions ?? [];
+  const latestVersion = versions[0] ?? null;
+  const stats = localStats ?? pkg.stats;
+  const returnTo = typeof window === "undefined" ? packageRoute(pkg.name) : `${window.location.pathname}${window.location.search}`;
+
+  async function handleStarPackage() {
+    if (!pkg || starBusy) return;
+    setStarBusy(true);
+    setDetailNotice(null);
+    setDetailError(null);
+    try {
+      const result = await togglePackageStar(pkg.name);
+      setStarred(result.starred);
+      setLocalStats(result.stats);
+      if (result.package) onPackageUpdated(result.package);
+      setDetailNotice(result.starred ? "Added to your highlights." : "Removed from your highlights.");
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "Failed to update highlight.");
+    } finally {
+      setStarBusy(false);
+    }
+  }
+
+  async function submitComment(event: FormEvent) {
+    event.preventDefault();
+    if (!pkg || !commentBody.trim()) return;
+    setDetailNotice(null);
+    setDetailError(null);
+    try {
+      const result = await postPackageComment(pkg.name, commentBody);
+      if (result.comment) setComments((current) => [...current, result.comment as PackageComment]);
+      setCommentBody("");
+      setDetailNotice("Comment posted.");
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "Failed to post comment.");
+    }
+  }
+
+  async function submitReport(event: FormEvent) {
+    event.preventDefault();
+    if (!pkg || !reportReason.trim()) return;
+    setDetailNotice(null);
+    setDetailError(null);
+    try {
+      await reportPackage(pkg.name, reportReason);
+      setReportReason("");
+      setReportOpen(false);
+      setDetailNotice("Report submitted for review.");
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "Failed to submit report.");
+    }
+  }
 
   return (
     <section className="detail-panel">
@@ -610,119 +751,259 @@ function DetailPanel({ detail }: { detail: PackageDetail | null }) {
           </div>
           <p className="detail-name">{pkg.name}</p>
         </div>
-        <a className="primary-action" href={packageDownloadUrl(pkg.name, pkg.latestVersion)}>
-          <ArrowDownToLine size={16} aria-hidden="true" />
-          Download
-        </a>
+        <div className="detail-actions">
+          {user ? (
+            <button className="secondary-action" type="button" disabled={starBusy} onClick={() => void handleStarPackage()}>
+              <Star size={16} aria-hidden="true" />
+              {starred ? "Starred" : "Star"}
+            </button>
+          ) : (
+            <a className="secondary-action" href={githubLoginUrl(returnTo)}>
+              <Star size={16} aria-hidden="true" />
+              Star
+            </a>
+          )}
+          <a className="primary-action" href={packageDownloadUrl(pkg.name, pkg.latestVersion)}>
+            <ArrowDownToLine size={16} aria-hidden="true" />
+            Download
+          </a>
+        </div>
       </div>
 
-      <p className="detail-summary">{pkg.summary ?? "No summary published yet."}</p>
+      {detailNotice ? <p className="form-success">{detailNotice}</p> : null}
+      {detailError ? <p className="form-error">{detailError}</p> : null}
 
-      {topics.length > 0 ? (
-        <div className="topic-row" aria-label="Package topics">
-          {topics.map((topic) => (
-            <Link className="topic-link" to={tagRoute(topic)} key={topic}>
-              #{topic}
-            </Link>
-          ))}
+      <div className="detail-tabs" role="tablist" aria-label="Package detail tabs">
+        {(["overview", "versions", "compatibility", "files", "discussion"] as const).map((tab) => (
+          <button
+            className={activeTab === tab ? "is-active" : ""}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "overview" ? (
+        <div className="detail-tab-body">
+          <p className="detail-summary">{pkg.summary ?? "No summary published yet."}</p>
+          {topics.length > 0 ? (
+            <div className="topic-row" aria-label="Package topics">
+              {topics.map((topic) => (
+                <Link className="topic-link" to={tagRoute(topic)} key={topic}>
+                  #{topic}
+                </Link>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="stat-grid">
+            <div>
+              <span className="stat-label">Latest</span>
+              <strong>{pkg.latestVersion ? `v${pkg.latestVersion}` : "None"}</strong>
+            </div>
+            <div>
+              <span className="stat-label">Downloads</span>
+              <strong>{stats?.downloads ?? 0}</strong>
+            </div>
+            <div>
+              <span className="stat-label">Stars</span>
+              <strong>{stats?.stars ?? 0}</strong>
+            </div>
+            <div>
+              <span className="stat-label">Versions</span>
+              <strong>{stats?.versions ?? (pkg.latestVersion ? 1 : 0)}</strong>
+            </div>
+          </div>
+
+          <div className="info-section">
+            <h2>
+              <ShieldCheck size={17} aria-hidden="true" />
+              Review Status
+            </h2>
+            <div className="compat-grid">
+              <InfoCell label="moderation" value={formatStatus(verification?.moderationStatus)} />
+              <InfoCell label="securityScan" value={formatStatus(verification?.scanStatus)} />
+              <InfoCell label="tier" value={formatStatus(verification?.tier)} />
+              <InfoCell label="risk" value={formatStatus(verification?.riskLevel)} />
+            </div>
+          </div>
         </div>
       ) : null}
 
-      <div className="stat-grid">
-        <div>
-          <span className="stat-label">Latest</span>
-          <strong>{pkg.latestVersion ? `v${pkg.latestVersion}` : "None"}</strong>
-        </div>
-        <div>
-          <span className="stat-label">Downloads</span>
-          <strong>{pkg.stats?.downloads ?? 0}</strong>
-        </div>
-        <div>
-          <span className="stat-label">Versions</span>
-          <strong>{pkg.stats?.versions ?? (pkg.latestVersion ? 1 : 0)}</strong>
-        </div>
-      </div>
-
-      <div className="info-section">
-        <h2>
-          <History size={17} aria-hidden="true" />
-          Version History
-        </h2>
-        <div className="version-list">
-          {versions.length === 0 ? <p className="muted">No published versions yet.</p> : null}
-          {versions.map((version) => {
-            const isLatest = version.distTags.includes("latest");
-            return (
-              <div className="version-row" key={version.version}>
-                <div className="version-main">
-                  <div className="version-title">
-                    <strong>v{version.version}</strong>
-                    {isLatest ? <span className="tag latest-tag">latest</span> : null}
+      {activeTab === "versions" ? (
+        <div className="info-section detail-tab-body">
+          <h2>
+            <History size={17} aria-hidden="true" />
+            Version History
+          </h2>
+          <div className="version-list">
+            {versions.length === 0 ? <p className="muted">No published versions yet.</p> : null}
+            {versions.map((version) => {
+              const isLatest = version.distTags.includes("latest");
+              return (
+                <div className="version-row" key={version.version}>
+                  <div className="version-main">
+                    <div className="version-title">
+                      <strong>v{version.version}</strong>
+                      {isLatest ? <span className="tag latest-tag">latest</span> : null}
+                    </div>
+                    <span className="version-meta">
+                      {formatDate(version.createdAt)} · {version.files.length} files
+                    </span>
+                    {version.changelog ? <p>{version.changelog}</p> : null}
+                    <code className="version-digest">{version.sha256hash.slice(0, 16)}</code>
                   </div>
-                  <span className="version-meta">
-                    {formatDate(version.createdAt)} · {version.files.length} files
-                  </span>
-                  {version.changelog ? <p>{version.changelog}</p> : null}
-                  <code className="version-digest">{version.sha256hash.slice(0, 16)}</code>
+                  <a
+                    className="icon-action"
+                    href={packageDownloadUrl(pkg.name, version.version)}
+                    aria-label={`Download ${pkg.name} ${version.version}`}
+                  >
+                    <ArrowDownToLine size={16} aria-hidden="true" />
+                  </a>
                 </div>
-                <a
-                  className="icon-action"
-                  href={packageDownloadUrl(pkg.name, version.version)}
-                  aria-label={`Download ${pkg.name} ${version.version}`}
-                >
-                  <ArrowDownToLine size={16} aria-hidden="true" />
-                </a>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "compatibility" ? (
+        <div className="detail-tab-body">
+          <div className="info-section">
+            <h2>
+              <ShieldCheck size={17} aria-hidden="true" />
+              Compatibility
+            </h2>
+            <div className="compat-grid">
+              <InfoCell label="pluginApi" value={compatibility?.pluginApiRange ?? "Not required"} />
+              <InfoCell label="minGatewayVersion" value={compatibility?.minGatewayVersion ?? "Any"} />
+              <InfoCell label="builtWith" value={compatibility?.builtWithKovaVersion ?? "Not declared"} />
+              <InfoCell label="pluginSdk" value={compatibility?.pluginSdkVersion ?? "Not declared"} />
+            </div>
+          </div>
+
+          <div className="info-section">
+            <h2>
+              <Plug size={17} aria-hidden="true" />
+              Capability Signals
+            </h2>
+            <div className="tag-cloud">
+              {(capabilities?.capabilityTags?.length ? capabilities.capabilityTags : tags.map(([tag]) => tag)).map(
+                (tag) => (
+                  <span className="tag" key={tag}>
+                    {tag}
+                  </span>
+                ),
+              )}
+              {capabilities?.executesCode ? <span className="tag danger">executes code</span> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "files" ? (
+        <div className="info-section detail-tab-body">
+          <h2>
+            <FileArchive size={17} aria-hidden="true" />
+            Archive Files
+          </h2>
+          <div className="version-list">
+            {!latestVersion || latestVersion.files.length === 0 ? <p className="muted">No file metadata published.</p> : null}
+            {latestVersion?.files.map((file) => (
+              <div className="archive-file-row" key={file.path}>
+                <div>
+                  <strong>{file.path}</strong>
+                  <span>{file.contentType ?? "file"} · {formatCompactNumber(file.size, "0")} bytes</span>
+                </div>
+                <code>{file.sha256.slice(0, 16)}</code>
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="info-section">
-        <h2>
-          <ShieldCheck size={17} aria-hidden="true" />
-          Compatibility
-        </h2>
-        <div className="compat-grid">
-          <InfoCell label="pluginApi" value={compatibility?.pluginApiRange ?? "Not required"} />
-          <InfoCell label="minGatewayVersion" value={compatibility?.minGatewayVersion ?? "Any"} />
-          <InfoCell
-            label="builtWith"
-            value={compatibility?.builtWithKovaVersion ?? "Not declared"}
-          />
-          <InfoCell label="pluginSdk" value={compatibility?.pluginSdkVersion ?? "Not declared"} />
-        </div>
-      </div>
+      {activeTab === "discussion" ? (
+        <div className="detail-tab-body discussion-panel">
+          <div className="info-section">
+            <h2>
+              <MessageSquare size={17} aria-hidden="true" />
+              Comments
+            </h2>
+            {user ? (
+              <form className="comment-form" onSubmit={submitComment}>
+                <textarea
+                  value={commentBody}
+                  onChange={(event) => setCommentBody(event.target.value)}
+                  placeholder="Leave a note for other KovaHub users."
+                  rows={4}
+                />
+                <button className="primary-action" type="submit" disabled={!commentBody.trim()}>
+                  <MessageSquare size={16} aria-hidden="true" />
+                  Post comment
+                </button>
+              </form>
+            ) : (
+              <p className="muted">
+                <a className="inline-link" href={githubLoginUrl(returnTo)}>Sign in with GitHub</a> to comment.
+              </p>
+            )}
+            <div className="comment-list">
+              {commentsLoading ? <p className="muted">Loading comments...</p> : null}
+              {!commentsLoading && comments.length === 0 ? <p className="muted">No comments yet.</p> : null}
+              {comments.map((comment) => (
+                <article className="comment-card" key={comment.id}>
+                  <div className="comment-card-head">
+                    <strong>@{comment.user.handle}</strong>
+                    <span>{formatDate(comment.createdAt)}</span>
+                  </div>
+                  <p>{comment.body}</p>
+                </article>
+              ))}
+            </div>
+          </div>
 
-      <div className="info-section">
-        <h2>
-          <ShieldCheck size={17} aria-hidden="true" />
-          Review Status
-        </h2>
-        <div className="compat-grid">
-          <InfoCell label="moderation" value={formatStatus(verification?.moderationStatus)} />
-          <InfoCell label="securityScan" value={formatStatus(verification?.scanStatus)} />
-          <InfoCell label="tier" value={formatStatus(verification?.tier)} />
-          <InfoCell label="risk" value={formatStatus(verification?.riskLevel)} />
+          <div className="info-section">
+            <h2>
+              <Flag size={17} aria-hidden="true" />
+              Report Package
+            </h2>
+            {user ? (
+              reportOpen ? (
+                <form className="comment-form" onSubmit={submitReport}>
+                  <textarea
+                    value={reportReason}
+                    onChange={(event) => setReportReason(event.target.value)}
+                    placeholder="What should moderators review?"
+                    rows={3}
+                  />
+                  <div className="form-actions">
+                    <button className="secondary-action" type="button" onClick={() => setReportOpen(false)}>
+                      Cancel
+                    </button>
+                    <button className="primary-action" type="submit" disabled={!reportReason.trim()}>
+                      Submit report
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button className="secondary-action" type="button" onClick={() => setReportOpen(true)}>
+                  <Flag size={16} aria-hidden="true" />
+                  Report for review
+                </button>
+              )
+            ) : (
+              <p className="muted">
+                <a className="inline-link" href={githubLoginUrl(returnTo)}>Sign in with GitHub</a> to report packages.
+              </p>
+            )}
+          </div>
         </div>
-      </div>
-
-      <div className="info-section">
-        <h2>
-          <Plug size={17} aria-hidden="true" />
-          Capability Signals
-        </h2>
-        <div className="tag-cloud">
-          {(capabilities?.capabilityTags?.length ? capabilities.capabilityTags : tags.map(([tag]) => tag)).map(
-            (tag) => (
-              <span className="tag" key={tag}>
-                {tag}
-              </span>
-            ),
-          )}
-          {capabilities?.executesCode ? <span className="tag danger">executes code</span> : null}
-        </div>
-      </div>
+      ) : null}
     </section>
   );
 }
@@ -1264,6 +1545,8 @@ function LandingHeader({
             <div className="home-user-chip">
               <UserRound size={15} aria-hidden="true" />
               <span>{displayUserName(user)}</span>
+              <Link to="/dashboard">Dashboard</Link>
+              <Link to="/stars">Stars</Link>
               <Link to="/profile">Profile</Link>
               <button type="button" onClick={onSignOut}>
                 Sign out
@@ -1288,6 +1571,7 @@ function LandingHeader({
           Plugins
         </Link>
         <Link to="/publishers">Publishers</Link>
+        <Link to="/audits">Audits</Link>
         <Link to="/docs">Docs</Link>
       </nav>
     </header>
@@ -1346,7 +1630,7 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
   );
 
   function runSearch(value: string) {
-    navigate(marketplaceRoute({ q: value }));
+    navigate(searchRoute({ q: value }));
   }
 
   function submitHeroSearch(event: FormEvent<HTMLFormElement>) {
@@ -1598,7 +1882,7 @@ function LandingPageShell({
           clearToken();
           setUser(null);
         }}
-        onSearch={(query) => navigate(marketplaceRoute({ q: query }))}
+        onSearch={(query) => navigate(searchRoute({ q: query }))}
         theme={theme}
       />
       <main className="content-page-shell">{children}</main>
@@ -2175,6 +2459,355 @@ function DocsPage({ theme }: { theme: ThemeSettings }) {
   );
 }
 
+function parseSearchKind(value: string | null): SearchKind {
+  return value === "skills" || value === "plugins" ? value : "all";
+}
+
+function SearchPage({ theme }: { theme: ThemeSettings }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeType = parseSearchKind(searchParams.get("type"));
+  const [query, setQuery] = useState(searchParams.get("q") ?? "");
+  const [items, setItems] = useState<PackageListItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setQuery(searchParams.get("q") ?? "");
+  }, [searchParams]);
+
+  useEffect(() => {
+    let active = true;
+    const q = searchParams.get("q") ?? "";
+    setLoading(true);
+    setError(null);
+    fetchPackages({
+      q: q.trim() || undefined,
+      family: activeType === "skills" ? "skill" : undefined,
+      limit: 100,
+      sort: "trending",
+    })
+      .then((page) => {
+        if (!active) return;
+        setItems(activeType === "plugins" ? page.items.filter((item) => item.family !== "skill") : page.items);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to search packages.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeType, searchParams]);
+
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    const next = new URLSearchParams();
+    if (query.trim()) next.set("q", query.trim());
+    if (activeType !== "all") next.set("type", activeType);
+    setSearchParams(next);
+  }
+
+  function setType(type: SearchKind) {
+    const next = new URLSearchParams(searchParams);
+    if (type === "all") next.delete("type");
+    else next.set("type", type);
+    setSearchParams(next);
+  }
+
+  const skillCount = items.filter((item) => item.family === "skill").length;
+  const pluginCount = items.filter((item) => item.family !== "skill").length;
+
+  return (
+    <LandingPageShell theme={theme}>
+      <section className="content-hero">
+        <p>SEARCH</p>
+        <h1>{searchParams.get("q") ? `Results for "${searchParams.get("q")}"` : "Search KovaHub"}</h1>
+        <span>Find Kova-compatible skills, code plugins, bundle plugins, publishers, and compatibility metadata.</span>
+      </section>
+
+      <section className="content-section search-page-section">
+        <form className="search-page-form" onSubmit={submitSearch}>
+          <div className="search-box search-page-field">
+            <Search size={16} aria-hidden="true" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search skills and plugins..." />
+          </div>
+          <button className="content-primary-action" type="submit">
+            Search <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        </form>
+
+        <div className="search-tabs" role="tablist" aria-label="Search result type">
+          {(["all", "skills", "plugins"] as const).map((type) => (
+            <button
+              className={activeType === type ? "is-active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={activeType === type}
+              key={type}
+              onClick={() => setType(type)}
+            >
+              {type}
+              <span>{type === "skills" ? skillCount : type === "plugins" ? pluginCount : items.length}</span>
+            </button>
+          ))}
+        </div>
+
+        {loading ? <p className="content-muted">Searching...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        {!loading && items.length === 0 ? <p className="content-muted">No matches found.</p> : null}
+        <div className="directory-grid">
+          {items.map((item) => (
+            <DirectoryPackageCard item={item} key={item.name} />
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
+function StarsPage({ theme }: { theme: ThemeSettings }) {
+  const { user, setUser } = useLandingUser();
+  const [items, setItems] = useState<PackageListItem[]>([]);
+  const [loading, setLoading] = useState(Boolean(getStoredToken()));
+  const [error, setError] = useState<string | null>(null);
+  const hasSession = Boolean(getStoredToken());
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchStarredPackages({ limit: 100 })
+      .then((page) => {
+        if (active) setItems(page.items);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load highlights.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  if (!hasSession && !user) {
+    return (
+      <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+        <section className="auth-card profile-auth-card">
+          <div className="section-title">
+            <Star size={17} aria-hidden="true" />
+            <h2>Sign in to see your highlights</h2>
+          </div>
+          <p className="muted">Star KovaHub packages for quick access later.</p>
+          <a className="content-primary-action" href={githubLoginUrl("/stars")}>
+            <Github size={16} aria-hidden="true" />
+            Sign in with GitHub
+          </a>
+        </section>
+      </LandingPageShell>
+    );
+  }
+
+  return (
+    <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+      <section className="content-hero">
+        <p>HIGHLIGHTS</p>
+        <h1>Your starred packages</h1>
+        <span>ClawHub-style highlights for skills and plugins you want to revisit.</span>
+        <div className="content-actions">
+          <Link className="content-primary-action" to="/search">
+            Find packages <Search size={16} aria-hidden="true" />
+          </Link>
+          <Link className="content-secondary-action" to="/marketplace">
+            Marketplace
+          </Link>
+        </div>
+      </section>
+
+      <section className="content-section">
+        <div className="content-section-head">
+          <h2>Starred packages</h2>
+          <span>{items.length} saved</span>
+        </div>
+        {loading ? <p className="content-muted">Loading highlights...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        {!loading && items.length === 0 ? <p className="content-muted">No starred packages yet.</p> : null}
+        <div className="directory-grid">
+          {items.map((item) => (
+            <DirectoryPackageCard item={item} key={item.name} />
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
+function DashboardPage({ theme }: { theme: ThemeSettings }) {
+  const { user, setUser } = useLandingUser();
+  const [items, setItems] = useState<PackageListItem[]>([]);
+  const [loading, setLoading] = useState(Boolean(getStoredToken()));
+  const [error, setError] = useState<string | null>(null);
+  const hasSession = Boolean(getStoredToken());
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchPackages({ owner: user.handle, limit: 100 })
+      .then((page) => {
+        if (active) setItems(page.items);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load dashboard.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  if (!hasSession && !user) {
+    return (
+      <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+        <section className="auth-card profile-auth-card">
+          <div className="section-title">
+            <LayoutDashboard size={17} aria-hidden="true" />
+            <h2>Sign in to access your dashboard</h2>
+          </div>
+          <p className="muted">GitHub sign-in is required to manage your KovaHub packages.</p>
+          <a className="content-primary-action" href={githubLoginUrl("/dashboard")}>
+            <Github size={16} aria-hidden="true" />
+            Sign in with GitHub
+          </a>
+        </section>
+      </LandingPageShell>
+    );
+  }
+
+  const stats = items.reduce(
+    (accumulator, item) => ({
+      packages: accumulator.packages + 1,
+      downloads: accumulator.downloads + (item.stats?.downloads ?? 0),
+      stars: accumulator.stars + (item.stats?.stars ?? 0),
+      pending: accumulator.pending + (item.moderationStatus === "pending" ? 1 : 0),
+    }),
+    { packages: 0, downloads: 0, stars: 0, pending: 0 },
+  );
+
+  return (
+    <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+      <section className="content-hero">
+        <p>DASHBOARD</p>
+        <h1>{user ? `@${user.handle}` : "Publisher dashboard"}</h1>
+        <span>Manage your KovaHub package activity, publishing tokens, and review status.</span>
+        <div className="content-actions">
+          <Link className="content-primary-action" to="/publish">
+            Publish package <UploadCloud size={16} aria-hidden="true" />
+          </Link>
+          {user ? (
+            <Link className="content-secondary-action" to={publisherRoute(user.handle)}>
+              Public profile
+            </Link>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="dashboard-grid">
+        <article className="profile-card">
+          <div className="section-title">
+            <LayoutDashboard size={17} aria-hidden="true" />
+            <h2>Publisher stats</h2>
+          </div>
+          <div className="profile-stats dashboard-stats">
+            <span><strong>{stats.packages}</strong>Packages</span>
+            <span><strong>{formatCompactNumber(stats.downloads, "0")}</strong>Downloads</span>
+            <span><strong>{formatCompactNumber(stats.stars, "0")}</strong>Stars</span>
+            <span><strong>{stats.pending}</strong>Pending</span>
+          </div>
+        </article>
+        <ApiTokenPanel user={user} />
+      </section>
+
+      <section className="content-section">
+        <div className="content-section-head">
+          <h2>Your packages</h2>
+          <span>{items.length} listed</span>
+        </div>
+        {loading ? <p className="content-muted">Loading packages...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        {!loading && items.length === 0 ? <p className="content-muted">No packages published yet.</p> : null}
+        <div className="directory-grid">
+          {items.map((item) => (
+            <DirectoryPackageCard item={item} key={item.name} />
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
+function AuditsPage({ theme }: { theme: ThemeSettings }) {
+  const { packages, loading, error } = usePackageCatalog();
+  const auditItems = packages.filter(
+    (item) =>
+      item.scanStatus ||
+      item.moderationStatus ||
+      item.verificationTier ||
+      item.executesCode ||
+      item.family !== "skill",
+  );
+  const pending = auditItems.filter((item) => item.scanStatus === "pending" || item.moderationStatus === "pending").length;
+  const codePackages = auditItems.filter((item) => item.executesCode).length;
+
+  return (
+    <LandingPageShell theme={theme}>
+      <section className="content-hero">
+        <p>AUDITS</p>
+        <h1>Package review queue</h1>
+        <span>Security and moderation signals for Kova-compatible packages.</span>
+        <div className="profile-stats">
+          <span><strong>{auditItems.length}</strong>Tracked</span>
+          <span><strong>{pending}</strong>Pending</span>
+          <span><strong>{codePackages}</strong>Execute code</span>
+        </div>
+      </section>
+
+      <section className="content-section">
+        <div className="content-section-head">
+          <h2>Audit signals</h2>
+          <span>{auditItems.length} packages</span>
+        </div>
+        {loading ? <p className="content-muted">Loading audits...</p> : null}
+        {error ? <p className="content-muted">{error}</p> : null}
+        <div className="audit-list">
+          {auditItems.map((item) => (
+            <Link className="audit-row" to={packageRoute(item.name)} key={item.name}>
+              <span className="audit-icon">
+                <ListChecks size={18} aria-hidden="true" />
+              </span>
+              <span>
+                <strong>{item.displayName}</strong>
+                <small>{item.name}</small>
+              </span>
+              <span>{familyLabels[item.family]}</span>
+              <span>{formatStatus(item.moderationStatus)}</span>
+              <span>{formatStatus(item.scanStatus)}</span>
+              <ArrowRight size={15} aria-hidden="true" />
+            </Link>
+          ))}
+        </div>
+      </section>
+    </LandingPageShell>
+  );
+}
+
 function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2264,6 +2897,22 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
     next.delete("owner");
     next.delete("tag");
     setSearchParams(next);
+  }
+
+  function applyPackageUpdate(item: PackageListItem) {
+    setPackages((current) => current.map((candidate) => (candidate.name === item.name ? item : candidate)));
+    setDetail((current) =>
+      current?.package?.name === item.name
+        ? {
+            ...current,
+            package: {
+              ...current.package,
+              ...item,
+              stats: item.stats ?? current.package.stats,
+            },
+          }
+        : current,
+    );
   }
 
   const visibleMeta = useMemo(() => {
@@ -2385,7 +3034,7 @@ function Marketplace({ publishMode = false }: { publishMode?: boolean }) {
               <ApiTokenPanel user={user} />
             </div>
           ) : (
-            <DetailPanel detail={detail} />
+            <DetailPanel detail={detail} user={user} onPackageUpdated={applyPackageUpdate} />
           )}
         </section>
       </main>
@@ -2406,6 +3055,14 @@ export default function App() {
       <Route path="/publishers" element={<PublishersPage theme={theme} />} />
       <Route path="/tags/:tag" element={<TagPage theme={theme} />} />
       <Route path="/docs" element={<DocsPage theme={theme} />} />
+      <Route path="/search" element={<SearchPage theme={theme} />} />
+      <Route path="/stars" element={<StarsPage theme={theme} />} />
+      <Route path="/dashboard" element={<DashboardPage theme={theme} />} />
+      <Route path="/audits" element={<AuditsPage theme={theme} />} />
+      <Route path="/skills/publish" element={<Marketplace publishMode />} />
+      <Route path="/plugins/publish" element={<Marketplace publishMode />} />
+      <Route path="/skills/:slug" element={<Marketplace />} />
+      <Route path="/plugins/*" element={<Marketplace />} />
       <Route path="/marketplace" element={<Marketplace />} />
       <Route path="/packages/*" element={<Marketplace />} />
       <Route path="/publish" element={<Marketplace publishMode />} />

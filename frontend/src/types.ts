@@ -99,6 +99,29 @@ export type PackageDetail = {
   } | null;
 };
 
+export type PackageComment = {
+  id: string;
+  packageName: string;
+  user: {
+    id: string;
+    handle: string;
+  };
+  body: string;
+  reportCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type PackageStarState = {
+  starred: boolean;
+};
+
+export type PackageStarToggleResult = {
+  package: PackageListItem | null;
+  stats: PackageStats | null;
+  starred: boolean;
+};
+
 export type AuthUser = {
   id: string;
   handle: string;
