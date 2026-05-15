@@ -12,9 +12,9 @@
   --ink-soft: #a3a3a3;
   --line: rgba(255, 255, 255, 0.1);
   --line-strong: rgba(255, 255, 255, 0.18);
-  --accent: #c2410c;
-  --accent-deep: #f97316;
-  --accent-soft: rgba(249, 115, 22, 0.14);
+  --accent: #c83229;
+  --accent-deep: #ef4444;
+  --accent-soft: rgba(200, 50, 41, 0.14);
   --green: #22c55e;
   --gold: #fbbf24;
   --font-display: "Bricolage Grotesque", "Inter", system-ui, sans-serif;
@@ -103,7 +103,7 @@ button {
   display: inline-grid;
   place-items: center;
   overflow: hidden;
-  border: 1px solid rgba(249, 115, 22, 0.55);
+  border: 1px solid rgba(200, 50, 41, 0.55);
   background: var(--accent-soft);
   color: #fff;
 }
@@ -173,16 +173,16 @@ button {
   --hv2-surface-hover: rgba(255, 251, 245, 0.94);
   --hv2-border: rgba(118, 88, 64, 0.15);
   --hv2-border-hover: rgba(118, 88, 64, 0.28);
-  --hv2-border-strong: rgba(194, 65, 12, 0.24);
+  --hv2-border-strong: rgba(196, 58, 47, 0.24);
   --hv2-text: #1c1510;
   --hv2-text-secondary: #66594e;
   --hv2-text-tertiary: #8b7d70;
-  --hv2-accent: #c2410c;
-  --hv2-accent-fill: rgba(249, 115, 22, 0.08);
-  --hv2-accent-fill-hover: rgba(249, 115, 22, 0.14);
-  --hv2-accent-glow: rgba(249, 115, 22, 0.09);
-  --hv2-accent-border: rgba(249, 115, 22, 0.3);
-  --hv2-accent-border-hover: rgba(249, 115, 22, 0.52);
+  --hv2-accent: #c83229;
+  --hv2-accent-fill: rgba(200, 50, 41, 0.08);
+  --hv2-accent-fill-hover: rgba(200, 50, 41, 0.14);
+  --hv2-accent-glow: rgba(200, 50, 41, 0.09);
+  --hv2-accent-border: rgba(200, 50, 41, 0.3);
+  --hv2-accent-border-hover: rgba(200, 50, 41, 0.52);
   --hv2-green: #2d8a48;
   --hv2-green-fill: rgba(45, 138, 72, 0.08);
   --hv2-green-border: rgba(45, 138, 72, 0.24);
@@ -301,7 +301,7 @@ button {
 
 .home-theme-toggle button:hover,
 .home-user-chip button:hover {
-  color: #c2410c;
+  color: #c83229;
 }
 
 .home-theme-toggle button {
@@ -311,8 +311,8 @@ button {
 }
 
 .home-theme-toggle button.is-active {
-  background: rgba(249, 115, 22, 0.12);
-  color: #c2410c;
+  background: rgba(200, 50, 41, 0.12);
+  color: #c83229;
 }
 
 .home-github-button,
@@ -355,7 +355,7 @@ button {
 }
 
 .home-nav-secondary a:hover {
-  color: #c2410c;
+  color: #c83229;
 }
 
 .home-v2-main {
@@ -367,16 +367,16 @@ button {
   --hv2-surface-hover: rgba(255, 251, 245, 0.94);
   --hv2-border: rgba(118, 88, 64, 0.15);
   --hv2-border-hover: rgba(118, 88, 64, 0.28);
-  --hv2-border-strong: rgba(194, 65, 12, 0.24);
+  --hv2-border-strong: rgba(196, 58, 47, 0.24);
   --hv2-text: #1c1510;
   --hv2-text-secondary: #66594e;
   --hv2-text-tertiary: #8b7d70;
-  --hv2-accent: #c2410c;
-  --hv2-accent-fill: rgba(249, 115, 22, 0.08);
-  --hv2-accent-fill-hover: rgba(249, 115, 22, 0.14);
-  --hv2-accent-glow: rgba(249, 115, 22, 0.09);
-  --hv2-accent-border: rgba(249, 115, 22, 0.3);
-  --hv2-accent-border-hover: rgba(249, 115, 22, 0.52);
+  --hv2-accent: #c83229;
+  --hv2-accent-fill: rgba(200, 50, 41, 0.08);
+  --hv2-accent-fill-hover: rgba(200, 50, 41, 0.14);
+  --hv2-accent-glow: rgba(200, 50, 41, 0.09);
+  --hv2-accent-border: rgba(200, 50, 41, 0.3);
+  --hv2-accent-border-hover: rgba(200, 50, 41, 0.52);
   --hv2-green: #2d8a48;
   --hv2-green-fill: rgba(45, 138, 72, 0.08);
   --hv2-green-border: rgba(45, 138, 72, 0.24);
@@ -587,7 +587,7 @@ button {
   padding: 8px 8px 8px 24px;
   box-shadow:
     inset 0 0 16px rgba(255, 255, 255, 0.58),
-    0 0 0 3px rgba(249, 115, 22, 0.1);
+    0 0 0 3px rgba(200, 50, 41, 0.1);
 }
 
 .home-v2-search-icon {
@@ -965,17 +965,17 @@ button {
   --hv2-surface: rgba(44, 27, 16, 0.72);
   --hv2-surface-hover: rgba(61, 37, 20, 0.96);
   --hv2-border: rgba(255, 237, 213, 0.13);
-  --hv2-border-hover: rgba(251, 146, 60, 0.32);
-  --hv2-border-strong: rgba(251, 146, 60, 0.34);
+  --hv2-border-hover: rgba(239, 68, 68, 0.32);
+  --hv2-border-strong: rgba(239, 68, 68, 0.34);
   --hv2-text: #fff7ed;
   --hv2-text-secondary: #fed7aa;
   --hv2-text-tertiary: #d6a677;
-  --hv2-accent: #fb923c;
-  --hv2-accent-fill: rgba(249, 115, 22, 0.12);
-  --hv2-accent-fill-hover: rgba(249, 115, 22, 0.18);
-  --hv2-accent-glow: rgba(249, 115, 22, 0.18);
-  --hv2-accent-border: rgba(251, 146, 60, 0.38);
-  --hv2-accent-border-hover: rgba(251, 146, 60, 0.62);
+  --hv2-accent: #ef4444;
+  --hv2-accent-fill: rgba(200, 50, 41, 0.12);
+  --hv2-accent-fill-hover: rgba(200, 50, 41, 0.18);
+  --hv2-accent-glow: rgba(200, 50, 41, 0.18);
+  --hv2-accent-border: rgba(239, 68, 68, 0.38);
+  --hv2-accent-border-hover: rgba(239, 68, 68, 0.62);
 }
 
 .home-page[data-theme="dark"] .home-nav {
@@ -1018,11 +1018,11 @@ button {
 .home-page[data-theme="dark"] .home-theme-toggle button.is-active,
 .home-page[data-theme="dark"] .home-user-chip button:hover,
 .home-page[data-theme="dark"] .home-nav-secondary a:hover {
-  color: #fb923c;
+  color: #ef4444;
 }
 
 .home-page[data-theme="dark"] .home-theme-toggle button.is-active {
-  background: rgba(249, 115, 22, 0.16);
+  background: rgba(200, 50, 41, 0.16);
 }
 
 .home-page[data-theme="dark"] .home-nav-secondary a {
@@ -1035,17 +1035,17 @@ button {
   --hv2-surface: rgba(44, 27, 16, 0.72);
   --hv2-surface-hover: rgba(61, 37, 20, 0.96);
   --hv2-border: rgba(255, 237, 213, 0.13);
-  --hv2-border-hover: rgba(251, 146, 60, 0.32);
-  --hv2-border-strong: rgba(251, 146, 60, 0.34);
+  --hv2-border-hover: rgba(239, 68, 68, 0.32);
+  --hv2-border-strong: rgba(239, 68, 68, 0.34);
   --hv2-text: #fff7ed;
   --hv2-text-secondary: #fed7aa;
   --hv2-text-tertiary: #d6a677;
-  --hv2-accent: #fb923c;
-  --hv2-accent-fill: rgba(249, 115, 22, 0.12);
-  --hv2-accent-fill-hover: rgba(249, 115, 22, 0.18);
-  --hv2-accent-glow: rgba(249, 115, 22, 0.18);
-  --hv2-accent-border: rgba(251, 146, 60, 0.38);
-  --hv2-accent-border-hover: rgba(251, 146, 60, 0.62);
+  --hv2-accent: #ef4444;
+  --hv2-accent-fill: rgba(200, 50, 41, 0.12);
+  --hv2-accent-fill-hover: rgba(200, 50, 41, 0.18);
+  --hv2-accent-glow: rgba(200, 50, 41, 0.18);
+  --hv2-accent-border: rgba(239, 68, 68, 0.38);
+  --hv2-accent-border-hover: rgba(239, 68, 68, 0.62);
 }
 
 .home-page[data-theme="dark"] .home-v2-hero {
@@ -1062,7 +1062,7 @@ button {
 }
 
 .home-page[data-theme="dark"] .home-v2-ring {
-  border-color: rgba(251, 146, 60, 0.1);
+  border-color: rgba(239, 68, 68, 0.1);
 }
 
 .home-page[data-theme="dark"] .home-v2-hero-label {
@@ -1073,7 +1073,7 @@ button {
   background: rgba(44, 27, 16, 0.84);
   box-shadow:
     inset 0 0 16px rgba(255, 237, 213, 0.04),
-    0 0 0 3px rgba(249, 115, 22, 0.14);
+    0 0 0 3px rgba(200, 50, 41, 0.14);
 }
 
 .home-page[data-theme="dark"] .home-v2-search-icon,
@@ -1128,7 +1128,7 @@ button {
 
 .content-hero h1 {
   margin: 0;
-  color: var(--hv2-accent, #c2410c);
+  color: var(--hv2-accent, #c83229);
   font-family: var(--font-mono);
   font-size: clamp(38px, 5vw, 64px);
   line-height: 1.02;
@@ -1161,9 +1161,9 @@ button {
 }
 
 .content-primary-action {
-  border: 1px solid var(--hv2-accent-border, rgba(249, 115, 22, 0.3));
-  background: var(--hv2-accent-fill, rgba(249, 115, 22, 0.08));
-  color: var(--hv2-accent, #c2410c);
+  border: 1px solid var(--hv2-accent-border, rgba(200, 50, 41, 0.3));
+  background: var(--hv2-accent-fill, rgba(200, 50, 41, 0.08));
+  color: var(--hv2-accent, #c83229);
 }
 
 .content-secondary-action {
@@ -1243,10 +1243,10 @@ button {
   flex: 0 0 auto;
   width: 42px;
   height: 42px;
-  border: 1.5px solid var(--hv2-accent-border, rgba(249, 115, 22, 0.3));
+  border: 1.5px solid var(--hv2-accent-border, rgba(200, 50, 41, 0.3));
   border-radius: 8px;
-  background: var(--hv2-accent-fill, rgba(249, 115, 22, 0.08));
-  color: var(--hv2-accent, #c2410c);
+  background: var(--hv2-accent-fill, rgba(200, 50, 41, 0.08));
+  color: var(--hv2-accent, #c83229);
 }
 
 .directory-card h3,
@@ -1306,7 +1306,7 @@ button {
 }
 
 .docs-card > svg {
-  color: var(--hv2-accent, #c2410c);
+  color: var(--hv2-accent, #c83229);
 }
 
 .docs-card p {
@@ -1643,8 +1643,8 @@ code {
 }
 
 .search-box:focus-within {
-  border-color: rgba(249, 115, 22, 0.65);
-  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
+  border-color: rgba(200, 50, 41, 0.65);
+  box-shadow: 0 0 0 3px rgba(200, 50, 41, 0.16);
 }
 
 .search-box input,
@@ -1684,7 +1684,7 @@ code {
 
 .filter-row button.is-active,
 .mode-tabs button.is-active {
-  border-color: rgba(249, 115, 22, 0.68);
+  border-color: rgba(200, 50, 41, 0.68);
   background: var(--accent-soft);
   color: #fff;
 }
@@ -1712,7 +1712,7 @@ code {
 
 .package-row:hover,
 .package-row.is-active {
-  border-color: rgba(249, 115, 22, 0.48);
+  border-color: rgba(200, 50, 41, 0.48);
   background: rgba(255, 255, 255, 0.045);
 }
 
@@ -1812,9 +1812,9 @@ code {
   justify-content: center;
   gap: 8px;
   min-height: 40px;
-  border: 1px solid rgba(249, 115, 22, 0.55);
+  border: 1px solid rgba(200, 50, 41, 0.55);
   border-radius: 8px;
-  background: #c2410c;
+  background: #c83229;
   color: #fff;
   padding: 0 14px;
   font-weight: 800;
@@ -1910,7 +1910,7 @@ code {
 }
 
 .tag.danger {
-  border-color: rgba(249, 115, 22, 0.42);
+  border-color: rgba(200, 50, 41, 0.42);
   background: var(--accent-soft);
   color: #fff;
 }
@@ -2009,7 +2009,7 @@ label textarea {
 .file-field input::file-selector-button {
   min-height: 28px;
   margin-right: 10px;
-  border: 1px solid rgba(249, 115, 22, 0.45);
+  border: 1px solid rgba(200, 50, 41, 0.45);
   border-radius: 8px;
   background: var(--accent-soft);
   color: #fff;
@@ -2102,7 +2102,7 @@ label textarea {
 .token-secret-box button:hover,
 .token-list-heading button:hover,
 .token-row button:hover {
-  border-color: rgba(249, 115, 22, 0.55);
+  border-color: rgba(200, 50, 41, 0.55);
   color: #fff;
 }
 
@@ -2208,14 +2208,14 @@ label textarea {
   place-items: center;
   width: 36px;
   height: 36px;
-  border: 1px solid rgba(249, 115, 22, 0.45);
+  border: 1px solid rgba(200, 50, 41, 0.45);
   border-radius: 8px;
   background: var(--accent-soft);
   color: #fff;
 }
 
 .icon-action:hover {
-  border-color: rgba(249, 115, 22, 0.72);
+  border-color: rgba(200, 50, 41, 0.72);
   filter: brightness(1.08);
 }
 
