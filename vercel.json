@@ -23,7 +23,7 @@
       "destination": "/api/vercel?__kovahub_path=/healthz"
     },
     {
-      "source": "/:path*",
+      "source": "^/(?!api/|openapi\\.json$|healthz$|\\.well-known/)(.*)$",
       "destination": "/index.html"
     }
   ]
