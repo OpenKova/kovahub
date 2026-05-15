@@ -97,6 +97,8 @@ function useRoutePackageName() {
 }
 
 function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => void }) {
+  const returnTo = `${window.location.pathname}${window.location.search}`;
+
   return (
     <header className="navbar">
       <div className="navbar-inner">
@@ -111,19 +113,20 @@ function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => v
           <a href={`${getApiBase()}/api/v1/meta`}>Registry API</a>
           <Link to="/publish">Publish</Link>
         </nav>
-        <div className="user-chip">
-          <UserRound size={15} aria-hidden="true" />
-          {user ? (
-            <>
-              <span>@{user.handle}</span>
-              <button className="link-button" type="button" onClick={onSignOut}>
-                Sign out
-              </button>
-            </>
-          ) : (
-            <span>Signed out</span>
-          )}
-        </div>
+        {user ? (
+          <div className="user-chip">
+            <UserRound size={15} aria-hidden="true" />
+            <span>@{user.handle}</span>
+            <button className="link-button" type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <a className="user-chip github-sign-in-chip" href={githubLoginUrl(returnTo)}>
+            <Github size={15} aria-hidden="true" />
+            <span>Sign in with GitHub</span>
+          </a>
+        )}
       </div>
     </header>
   );
@@ -301,7 +304,8 @@ function InfoCell({ label, value }: { label: string; value: string }) {
 }
 
 function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
-  const [mode, setMode] = useState<"register" | "login">("register");
+  const [showPasswordAuth, setShowPasswordAuth] = useState(false);
+  const [mode, setMode] = useState<"register" | "login">("login");
   const [handle, setHandle] = useState("builder");
   const [email, setEmail] = useState("builder@example.com");
   const [password, setPassword] = useState("correct-horse");
@@ -326,45 +330,72 @@ function AuthPanel({ onAuth }: { onAuth: (user: AuthUser) => void }) {
   return (
     <form className="auth-card" onSubmit={submit}>
       <div className="section-title">
-        <KeyRound size={17} aria-hidden="true" />
-        <h2>{mode === "register" ? "Create account" : "Sign in"}</h2>
+        <Github size={17} aria-hidden="true" />
+        <h2>Sign in to KovaHub</h2>
       </div>
-      <a className="secondary-action github-action full" href={githubLoginUrl(returnTo)}>
+      <a className="primary-action github-action full" href={githubLoginUrl(returnTo)}>
         <Github size={16} aria-hidden="true" />
         Continue with GitHub
       </a>
-      <div className="auth-divider">
-        <span>or</span>
-      </div>
-      {mode === "register" ? (
-        <label>
-          Handle
-          <input value={handle} onChange={(event) => setHandle(event.target.value)} />
-        </label>
-      ) : null}
-      <label>
-        Email
-        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" />
-      </label>
-      <label>
-        Password
-        <input
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          type="password"
-        />
-      </label>
-      {error ? <p className="form-error">{error}</p> : null}
-      <button className="primary-action full" type="submit">
-        {mode === "register" ? "Create account" : "Sign in"}
-      </button>
-      <button
-        className="link-button"
-        type="button"
-        onClick={() => setMode(mode === "register" ? "login" : "register")}
-      >
-        {mode === "register" ? "Use existing account" : "Create a new account"}
-      </button>
+      {showPasswordAuth ? (
+        <>
+          <div className="auth-divider">
+            <span>email</span>
+          </div>
+          <div className="mode-tabs" aria-label="Account authentication mode">
+            <button
+              className={mode === "login" ? "is-active" : ""}
+              type="button"
+              onClick={() => {
+                setMode("login");
+                setError(null);
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              className={mode === "register" ? "is-active" : ""}
+              type="button"
+              onClick={() => {
+                setMode("register");
+                setError(null);
+              }}
+            >
+              Create account
+            </button>
+          </div>
+          {mode === "register" ? (
+            <label>
+              Handle
+              <input value={handle} onChange={(event) => setHandle(event.target.value)} />
+            </label>
+          ) : null}
+          <label>
+            Email
+            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" />
+          </label>
+          <label>
+            Password
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+            />
+          </label>
+          {error ? <p className="form-error">{error}</p> : null}
+          <button className="primary-action full" type="submit">
+            {mode === "register" ? "Create account" : "Sign in"}
+          </button>
+        </>
+      ) : (
+        <button
+          className="link-button auth-fallback-toggle"
+          type="button"
+          onClick={() => setShowPasswordAuth(true)}
+        >
+          Use email instead
+        </button>
+      )}
     </form>
   );
 }
