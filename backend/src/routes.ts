@@ -178,10 +178,13 @@ function parseFamily(value: unknown): PackageFamily | undefined {
 }
 
 function registryUrl() {
-  return (process.env.KOVAHUB_REGISTRY ?? process.env.KOVAHUB_REGISTRY_URL ?? "http://localhost:8787").replace(
-    /\/+$/,
-    "",
-  );
+  return (
+    process.env.KOVA_KOVAHUB_URL ??
+    process.env.KOVAHUB_URL ??
+    process.env.KOVAHUB_REGISTRY ??
+    process.env.KOVAHUB_REGISTRY_URL ??
+    "http://localhost:8787"
+  ).replace(/\/+$/, "");
 }
 
 function siteUrl() {
@@ -306,7 +309,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     registry: registryUrl(),
     site: siteUrl(),
     compatibility: {
-      env: ["KOVAHUB_REGISTRY", "KOVAHUB_SITE"],
+      env: ["KOVA_KOVAHUB_URL", "KOVAHUB_URL", "KOVAHUB_REGISTRY", "KOVAHUB_SITE"],
       packageCompatibilityFields: ["pluginApiRange", "minGatewayVersion"],
     },
   }));
@@ -320,6 +323,8 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     site: siteUrl(),
     minCliVersion: "0.0.1",
     env: {
+      url: "KOVAHUB_URL",
+      kovaUrl: "KOVA_KOVAHUB_URL",
       registry: "KOVAHUB_REGISTRY",
       site: "KOVAHUB_SITE",
     },

@@ -167,14 +167,15 @@ describe("registry api", () => {
     try {
       const meta = await app.inject("/api/v1/meta");
       expect(meta.statusCode).toBe(200);
-      expect(meta.json()).toMatchObject({
+      const body = meta.json();
+      expect(body).toMatchObject({
         name: "KovaHub",
         registry: "https://registry.kova.example",
         site: "https://hub.kova.example",
-        compatibility: {
-          env: ["KOVAHUB_REGISTRY", "KOVAHUB_SITE"],
-        },
       });
+      expect(body.compatibility.env).toEqual(
+        expect.arrayContaining(["KOVA_KOVAHUB_URL", "KOVAHUB_URL", "KOVAHUB_REGISTRY", "KOVAHUB_SITE"]),
+      );
     } finally {
       if (previousRegistry === undefined) {
         delete process.env.KOVAHUB_REGISTRY;

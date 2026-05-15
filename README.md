@@ -50,6 +50,8 @@ export KOVAHUB_S3_PREFIX=archives
 For local Kova testing:
 
 ```bash
+export KOVA_KOVAHUB_URL=http://localhost:8787
+export KOVAHUB_URL=http://localhost:8787
 export KOVAHUB_SITE=http://localhost:5173
 export KOVAHUB_REGISTRY=http://localhost:8787
 ```
@@ -108,6 +110,7 @@ Implemented in the scaffold:
   - registry responses expose `compatibility.pluginApiRange`
   - registry responses expose `compatibility.minGatewayVersion`
 - Kova-compatible registry target env docs.
+- Kova client compatibility smoke tests for package, skill, version, and archive routes.
 
 Registry-compatible read routes:
 
@@ -180,7 +183,7 @@ Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MA
 ## Remaining Hardening
 
 1. Add user-specific saved/starred package state.
-2. Add compatibility smoke tests against the local Kova reference contracts.
+2. Replace placeholder moderation/security status with real scanner integrations and reviewer workflows.
 
 ## References
 

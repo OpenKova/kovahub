@@ -1857,6 +1857,8 @@ function DocsPage({ theme }: { theme: ThemeSettings }) {
         <article className="docs-card">
           <KeyRound size={19} aria-hidden="true" />
           <h2>Environment targets</h2>
+          <code>KOVA_KOVAHUB_URL={getApiBase()}</code>
+          <code>KOVAHUB_URL={getApiBase()}</code>
           <code>KOVAHUB_REGISTRY={getApiBase()}</code>
           <code>KOVAHUB_SITE={siteUrl || "http://localhost:5173"}</code>
         </article>
