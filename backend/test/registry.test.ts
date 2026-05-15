@@ -190,6 +190,41 @@ describe("registry api", () => {
     }
   });
 
+  it("serves KovaHub registry discovery", async () => {
+    const previousRegistry = process.env.KOVAHUB_REGISTRY;
+    const previousSite = process.env.KOVAHUB_SITE;
+    process.env.KOVAHUB_REGISTRY = "https://registry.kova.example/";
+    process.env.KOVAHUB_SITE = "https://hub.kova.example/";
+    const app = await buildServer();
+    try {
+      const discovery = await app.inject("/.well-known/kovahub.json");
+      expect(discovery.statusCode).toBe(200);
+      expect(discovery.json()).toMatchObject({
+        name: "KovaHub",
+        apiBase: "https://registry.kova.example",
+        authBase: "https://registry.kova.example",
+        siteBase: "https://hub.kova.example",
+        minCliVersion: "0.0.1",
+        env: {
+          registry: "KOVAHUB_REGISTRY",
+          site: "KOVAHUB_SITE",
+        },
+      });
+    } finally {
+      if (previousRegistry === undefined) {
+        delete process.env.KOVAHUB_REGISTRY;
+      } else {
+        process.env.KOVAHUB_REGISTRY = previousRegistry;
+      }
+      if (previousSite === undefined) {
+        delete process.env.KOVAHUB_SITE;
+      } else {
+        process.env.KOVAHUB_SITE = previousSite;
+      }
+      await app.close();
+    }
+  });
+
   it("serves KovaHub-compatible package search and detail responses", async () => {
     const app = await buildServer();
     const search = await app.inject("/api/v1/packages/search?q=context");

@@ -149,6 +149,17 @@ function parseFamily(value: unknown): PackageFamily | undefined {
   return packageFamilies.find((family) => family === value);
 }
 
+function registryUrl() {
+  return (process.env.KOVAHUB_REGISTRY ?? process.env.KOVAHUB_REGISTRY_URL ?? "http://localhost:8787").replace(
+    /\/+$/,
+    "",
+  );
+}
+
+function siteUrl() {
+  return (process.env.KOVAHUB_SITE ?? process.env.KOVAHUB_SITE_URL ?? "http://localhost:5173").replace(/\/+$/, "");
+}
+
 function paginatedVersionList(versions: PackageVersionRecord[], query: z.infer<typeof versionListQuerySchema>) {
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 100);
   const offset = query.cursor ? Number.parseInt(query.cursor, 10) || 0 : 0;
@@ -264,11 +275,32 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
 
   app.get("/api/v1/meta", async () => ({
     name: "KovaHub",
-    registry: process.env.KOVAHUB_REGISTRY ?? process.env.KOVAHUB_REGISTRY_URL ?? "http://localhost:8787",
-    site: process.env.KOVAHUB_SITE ?? process.env.KOVAHUB_SITE_URL ?? "http://localhost:5173",
+    registry: registryUrl(),
+    site: siteUrl(),
     compatibility: {
       env: ["KOVAHUB_REGISTRY", "KOVAHUB_SITE"],
       packageCompatibilityFields: ["pluginApiRange", "minGatewayVersion"],
+    },
+  }));
+
+  app.get("/.well-known/kovahub.json", async () => ({
+    name: "KovaHub",
+    apiBase: registryUrl(),
+    authBase: registryUrl(),
+    siteBase: siteUrl(),
+    registry: registryUrl(),
+    site: siteUrl(),
+    minCliVersion: "0.0.1",
+    env: {
+      registry: "KOVAHUB_REGISTRY",
+      site: "KOVAHUB_SITE",
+    },
+    routes: {
+      packages: "/api/v1/packages",
+      plugins: "/api/v1/plugins",
+      skills: "/api/v1/skills",
+      search: "/api/v1/search",
+      whoami: "/api/v1/whoami",
     },
   }));
 

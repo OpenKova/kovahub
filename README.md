@@ -94,6 +94,7 @@ Implemented in the scaffold:
 
 Registry-compatible read routes:
 
+- `GET /.well-known/kovahub.json`
 - `GET /api/v1/packages`
 - `GET /api/v1/packages/search?q=...`
 - `GET /api/v1/packages/:name`
