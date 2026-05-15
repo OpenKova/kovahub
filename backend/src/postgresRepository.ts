@@ -24,6 +24,8 @@ import {
   type ApiTokenRecord,
   type AuthPrincipal,
   type ListPackagesOptions,
+  type PackageCommentRecord,
+  type PackageReportRecord,
   type RegistryRepository,
   type SearchPackagesOptions,
   type UserAccount,
@@ -86,6 +88,27 @@ type ApiTokenRow = QueryResultRow & {
   token_hash: string;
   created_at: Date;
   last_used_at: Date | null;
+};
+
+type PackageCommentRow = QueryResultRow & {
+  id: string;
+  package_name: string;
+  user_id: string;
+  user_handle: string;
+  body: string;
+  report_count: number;
+  hidden: boolean;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type PackageReportRow = QueryResultRow & {
+  id: string;
+  package_name: string;
+  user_id: string;
+  user_handle: string;
+  reason: string;
+  created_at: Date;
 };
 
 const packageColumns = `
@@ -198,6 +221,31 @@ function rowToApiToken(row: ApiTokenRow): ApiTokenRecord {
     tokenHash: row.token_hash,
     createdAt: timeMs(row.created_at),
     lastUsedAt: row.last_used_at ? timeMs(row.last_used_at) : null,
+  };
+}
+
+function rowToPackageComment(row: PackageCommentRow): PackageCommentRecord {
+  return {
+    id: row.id,
+    packageName: row.package_name,
+    userId: row.user_id,
+    userHandle: row.user_handle,
+    body: row.body,
+    reportCount: row.report_count,
+    hidden: row.hidden,
+    createdAt: timeMs(row.created_at),
+    updatedAt: timeMs(row.updated_at),
+  };
+}
+
+function rowToPackageReport(row: PackageReportRow): PackageReportRecord {
+  return {
+    id: row.id,
+    packageName: row.package_name,
+    userId: row.user_id,
+    userHandle: row.user_handle,
+    reason: row.reason,
+    createdAt: timeMs(row.created_at),
   };
 }
 
@@ -769,6 +817,213 @@ export class PostgresRegistryRepository implements RegistryRepository {
 
   async recordStar(name: string) {
     await this.incrementStat(name, "stars");
+  }
+
+  async getPackageStar(name: string, userId: string) {
+    const result = await this.pool.query<{ exists: boolean }>(
+      `
+        select exists(
+          select 1
+          from package_stars ps
+          join packages p on p.id = ps.package_id
+          where p.name = $1 and ps.user_id = $2
+        ) as exists
+      `,
+      [normalizeKey(name), userId],
+    );
+    return Boolean(result.rows[0]?.exists);
+  }
+
+  async togglePackageStar(name: string, user: AuthPrincipal) {
+    const packageName = normalizeKey(name);
+    const client = await this.pool.connect();
+    let starred = false;
+    try {
+      await client.query("begin");
+      const packageResult = await client.query<{ id: string }>(
+        "select id from packages where name = $1 for update",
+        [packageName],
+      );
+      const packageId = packageResult.rows[0]?.id;
+      if (!packageId) {
+        await client.query("rollback");
+        return null;
+      }
+
+      const existing = await client.query<{ package_id: string }>(
+        "select package_id from package_stars where package_id = $1 and user_id = $2",
+        [packageId, user.id],
+      );
+
+      if (existing.rows[0]) {
+        await client.query("delete from package_stars where package_id = $1 and user_id = $2", [
+          packageId,
+          user.id,
+        ]);
+        await client.query(
+          `
+            update packages
+            set stats = jsonb_set(stats, '{stars}', to_jsonb(greatest(coalesce((stats->>'stars')::int, 0) - 1, 0)), true)
+            where id = $1
+          `,
+          [packageId],
+        );
+        starred = false;
+      } else {
+        await client.query("insert into package_stars (package_id, user_id) values ($1, $2)", [
+          packageId,
+          user.id,
+        ]);
+        await client.query(
+          `
+            update packages
+            set stats = jsonb_set(stats, '{stars}', to_jsonb(coalesce((stats->>'stars')::int, 0) + 1), true)
+            where id = $1
+          `,
+          [packageId],
+        );
+        starred = true;
+      }
+
+      await client.query("commit");
+      const pkg = await this.getPackage(packageName);
+      return pkg ? { pkg, starred } : null;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listStarredPackages(userId: string, options: { limit?: number; cursor?: string } = {}) {
+    const limit = clampLimit(options.limit, 50);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const result = await this.pool.query<PackageRow>(
+      `
+        select
+          ${packageColumns}
+        from packages p
+        join users u on u.id = p.owner_id
+        join package_stars ps on ps.package_id = p.id
+        where ps.user_id = $1
+        order by ps.created_at desc
+        limit $2
+        offset $3
+      `,
+      [userId, limit + 1, offset],
+    );
+    const rows = result.rows.slice(0, limit);
+    return {
+      items: rows.map((row) => toPackageListItem(rowToPackage(row))),
+      nextCursor: result.rows.length > limit ? String(offset + limit) : null,
+    };
+  }
+
+  async listPackageComments(name: string, options: { limit?: number; cursor?: string } = {}) {
+    const limit = clampLimit(options.limit, 50);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const result = await this.pool.query<PackageCommentRow>(
+      `
+        select
+          pc.id,
+          p.name as package_name,
+          pc.user_id,
+          u.handle as user_handle,
+          pc.body,
+          pc.report_count,
+          pc.hidden,
+          pc.created_at,
+          pc.updated_at
+        from package_comments pc
+        join packages p on p.id = pc.package_id
+        join users u on u.id = pc.user_id
+        where p.name = $1 and pc.hidden = false
+        order by pc.created_at asc
+        limit $2
+        offset $3
+      `,
+      [normalizeKey(name), limit + 1, offset],
+    );
+    const rows = result.rows.slice(0, limit);
+    return {
+      items: rows.map(rowToPackageComment),
+      nextCursor: result.rows.length > limit ? String(offset + limit) : null,
+    };
+  }
+
+  async addPackageComment(name: string, user: AuthPrincipal, body: string) {
+    const result = await this.pool.query<PackageCommentRow>(
+      `
+        insert into package_comments (package_id, user_id, body)
+        select p.id, $2, $3
+        from packages p
+        where p.name = $1
+        returning
+          id,
+          (select name from packages where id = package_id) as package_name,
+          user_id,
+          (select handle from users where id = user_id) as user_handle,
+          body,
+          report_count,
+          hidden,
+          created_at,
+          updated_at
+      `,
+      [normalizeKey(name), user.id, body],
+    );
+    const row = result.rows[0];
+    return row ? rowToPackageComment(row) : null;
+  }
+
+  async reportPackage(name: string, user: AuthPrincipal, reason: string) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const report = await client.query<PackageReportRow>(
+        `
+          insert into package_reports (package_id, user_id, reason)
+          select p.id, $2, $3
+          from packages p
+          where p.name = $1
+          returning
+            id,
+            (select name from packages where id = package_id) as package_name,
+            user_id,
+            (select handle from users where id = user_id) as user_handle,
+            reason,
+            created_at
+        `,
+        [normalizeKey(name), user.id, reason],
+      );
+      const row = report.rows[0];
+      if (!row) {
+        await client.query("rollback");
+        return null;
+      }
+
+      await client.query(
+        `
+          update packages
+          set verification = coalesce(verification, '{}'::jsonb)
+            || jsonb_build_object(
+              'tier', coalesce(verification->>'tier', 'structural'),
+              'scope', coalesce(verification->>'scope', 'artifact-only'),
+              'moderationStatus', case when verification->>'moderationStatus' = 'approved' then 'pending' else coalesce(verification->>'moderationStatus', 'pending') end,
+              'summary', 'A community report is queued for moderation review.'
+            )
+          where name = $1
+        `,
+        [normalizeKey(name)],
+      );
+      await client.query("commit");
+      return rowToPackageReport(row);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   private async incrementStat(name: string, field: "downloads" | "installs" | "stars") {

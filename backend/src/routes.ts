@@ -11,7 +11,7 @@ import {
 } from "./contracts.js";
 import { requireAuth } from "./auth.js";
 import { preparePublishInputFromArchive } from "./packageInspection.js";
-import type { RegistryRepository, UserAccount } from "./repository.js";
+import type { PackageCommentRecord, RegistryRepository, UserAccount } from "./repository.js";
 
 const listQuerySchema = z.object({
   q: z.string().optional(),
@@ -39,6 +39,13 @@ const tagParamsSchema = z.object({ tag: z.string().trim().min(1) });
 const versionListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
+});
+const commentListQuerySchema = versionListQuerySchema;
+const commentBodySchema = z.object({
+  body: z.string().trim().min(1).max(2000),
+});
+const packageReportSchema = z.object({
+  reason: z.string().trim().min(3).max(1000),
 });
 const downloadQuerySchema = z.object({
   version: z.string().optional(),
@@ -101,6 +108,21 @@ function publicVersionDetail(pkg: PackageRecord, version: PackageVersionRecord) 
     version: {
       ...publicVersionSummary(version),
     },
+  };
+}
+
+function publicPackageComment(comment: PackageCommentRecord) {
+  return {
+    id: comment.id,
+    packageName: comment.packageName,
+    user: {
+      id: comment.userId,
+      handle: comment.userHandle,
+    },
+    body: comment.body,
+    reportCount: comment.reportCount,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
   };
 }
 
@@ -388,6 +410,17 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     return listPackageCatalog(request, reply, repo, { sort: "trending" });
   });
 
+  app.get("/api/v1/stars", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid stars list request." };
+    }
+    return repo.listStarredPackages(user.id, query.data);
+  });
+
   app.get("/api/v1/profiles/:handle", async (request, reply) => {
     const params = publisherParamsSchema.safeParse(request.params);
     if (!params.success) {
@@ -533,6 +566,106 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid package star signal." };
     }
     return recordPackageSignal(reply, repo, parsed.data.name, "star");
+  });
+
+  app.get("/api/v1/packages/:name/star", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package star state request." };
+    }
+    return { starred: await repo.getPackageStar(parsed.data.name, user.id) };
+  });
+
+  app.post("/api/v1/packages/:name/star/toggle", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package star request." };
+    }
+    const result = await repo.togglePackageStar(parsed.data.name, user);
+    if (!result) {
+      reply.code(404);
+      return { package: null, stats: null, starred: false };
+    }
+    return {
+      package: toPackageListItem(result.pkg),
+      stats: result.pkg.stats,
+      starred: result.starred,
+    };
+  });
+
+  app.get("/api/v1/packages/:name/comments", async (request, reply) => {
+    const params = packageParamsSchema.safeParse(request.params);
+    const query = commentListQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      reply.code(400);
+      return { error: "Invalid package comments request." };
+    }
+    const comments = await repo.listPackageComments(params.data.name, query.data);
+    return {
+      items: comments.items.map(publicPackageComment),
+      nextCursor: comments.nextCursor,
+    };
+  });
+
+  app.post("/api/v1/packages/:name/comments", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = commentBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package comments request."
+          : body.error.issues[0]?.message ?? "Invalid comment payload.",
+      };
+    }
+    const comment = await repo.addPackageComment(params.data.name, user, body.data.body);
+    if (!comment) {
+      reply.code(404);
+      return { comment: null };
+    }
+    reply.code(201);
+    return { comment: publicPackageComment(comment) };
+  });
+
+  app.post("/api/v1/packages/:name/report", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageReportSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package report request."
+          : body.error.issues[0]?.message ?? "Invalid report payload.",
+      };
+    }
+    const report = await repo.reportPackage(params.data.name, user, body.data.reason);
+    if (!report) {
+      reply.code(404);
+      return { report: null };
+    }
+    reply.code(201);
+    return {
+      report: {
+        id: report.id,
+        packageName: report.packageName,
+        user: {
+          id: report.userId,
+          handle: report.userHandle,
+        },
+        reason: report.reason,
+        createdAt: report.createdAt,
+      },
+    };
   });
 
   app.get("/api/v1/packages/:name/download", async (request, reply) => {

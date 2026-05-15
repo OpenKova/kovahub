@@ -52,6 +52,27 @@ export type ApiTokenRecord = {
   lastUsedAt: number | null;
 };
 
+export type PackageCommentRecord = {
+  id: string;
+  packageName: string;
+  userId: string;
+  userHandle: string;
+  body: string;
+  reportCount: number;
+  hidden: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type PackageReportRecord = {
+  id: string;
+  packageName: string;
+  userId: string;
+  userHandle: string;
+  reason: string;
+  createdAt: number;
+};
+
 export type ListPackagesOptions = {
   q?: string;
   family?: PackageFamily;
@@ -99,6 +120,12 @@ export type RegistryRepository = {
   recordDownload(name: string): Promise<void>;
   recordInstall(name: string): Promise<void>;
   recordStar(name: string): Promise<void>;
+  getPackageStar(name: string, userId: string): Promise<boolean>;
+  togglePackageStar(name: string, user: AuthPrincipal): Promise<{ pkg: PackageRecord; starred: boolean } | null>;
+  listStarredPackages(userId: string, options?: { limit?: number; cursor?: string }): Promise<{ items: PackageListItem[]; nextCursor: string | null }>;
+  listPackageComments(name: string, options?: { limit?: number; cursor?: string }): Promise<{ items: PackageCommentRecord[]; nextCursor: string | null }>;
+  addPackageComment(name: string, user: AuthPrincipal, body: string): Promise<PackageCommentRecord | null>;
+  reportPackage(name: string, user: AuthPrincipal, reason: string): Promise<PackageReportRecord | null>;
 };
 
 export type ArchiveFileInput = {
@@ -344,6 +371,9 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly apiTokens = new Map<string, ApiTokenRecord>();
   private readonly apiTokensByHash = new Map<string, string>();
   private readonly packages = new Map<string, PackageRecord>();
+  private readonly packageStars = new Map<string, { packageName: string; userId: string; createdAt: number }>();
+  private readonly packageComments = new Map<string, PackageCommentRecord>();
+  private readonly packageReports = new Map<string, PackageReportRecord>();
 
   constructor() {
     this.seedUsers();
@@ -634,6 +664,107 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   async recordStar(name: string) {
     const pkg = await this.getPackage(name);
     if (pkg) pkg.stats.stars += 1;
+  }
+
+  async getPackageStar(name: string, userId: string) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return false;
+    return this.packageStars.has(this.packageStarKey(pkg.name, userId));
+  }
+
+  async togglePackageStar(name: string, user: AuthPrincipal) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return null;
+    const key = this.packageStarKey(pkg.name, user.id);
+    const existing = this.packageStars.get(key);
+    if (existing) {
+      this.packageStars.delete(key);
+      pkg.stats.stars = Math.max(0, pkg.stats.stars - 1);
+      return { pkg, starred: false };
+    }
+
+    this.packageStars.set(key, { packageName: pkg.name, userId: user.id, createdAt: now() });
+    pkg.stats.stars += 1;
+    return { pkg, starred: true };
+  }
+
+  async listStarredPackages(userId: string, options: { limit?: number; cursor?: string } = {}) {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const starred = [...this.packageStars.values()]
+      .filter((entry) => entry.userId === userId)
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map((entry) => this.packages.get(normalizeKey(entry.packageName)))
+      .filter((pkg): pkg is PackageRecord => Boolean(pkg));
+    const page = starred.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      items: page.map(toPackageListItem),
+      nextCursor: nextOffset < starred.length ? String(nextOffset) : null,
+    };
+  }
+
+  async listPackageComments(name: string, options: { limit?: number; cursor?: string } = {}) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return { items: [], nextCursor: null };
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const comments = [...this.packageComments.values()]
+      .filter((comment) => normalizeKey(comment.packageName) === normalizeKey(pkg.name) && !comment.hidden)
+      .sort((left, right) => left.createdAt - right.createdAt);
+    const page = comments.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      items: page,
+      nextCursor: nextOffset < comments.length ? String(nextOffset) : null,
+    };
+  }
+
+  async addPackageComment(name: string, user: AuthPrincipal, body: string) {
+    const pkg = await this.getPackage(name);
+    const account = await this.findUserById(user.id);
+    if (!pkg || !account) return null;
+    const createdAt = now();
+    const comment: PackageCommentRecord = {
+      id: newId("comment"),
+      packageName: pkg.name,
+      userId: user.id,
+      userHandle: account.handle,
+      body,
+      reportCount: 0,
+      hidden: false,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    this.packageComments.set(comment.id, comment);
+    return comment;
+  }
+
+  async reportPackage(name: string, user: AuthPrincipal, reason: string) {
+    const pkg = await this.getPackage(name);
+    const account = await this.findUserById(user.id);
+    if (!pkg || !account) return null;
+    const report: PackageReportRecord = {
+      id: newId("report"),
+      packageName: pkg.name,
+      userId: user.id,
+      userHandle: account.handle,
+      reason,
+      createdAt: now(),
+    };
+    this.packageReports.set(report.id, report);
+    pkg.verification = {
+      tier: pkg.verification?.tier ?? "structural",
+      scope: pkg.verification?.scope ?? "artifact-only",
+      ...pkg.verification,
+      moderationStatus: pkg.verification?.moderationStatus === "approved" ? "pending" : pkg.verification?.moderationStatus ?? "pending",
+      summary: "A community report is queued for moderation review.",
+    };
+    return report;
+  }
+
+  private packageStarKey(packageName: string, userId: string) {
+    return `${normalizeKey(packageName)}:${userId}`;
   }
 
   private sortedPackages(sort?: ListPackagesOptions["sort"]) {

@@ -638,6 +638,95 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("supports authenticated highlights, comments, and reports", async () => {
+    const app = await buildServer();
+    const jwt = await signInWithGitHub(app);
+    const packagePath = "/api/v1/packages/%40openkova%2Fcontext-bridge";
+
+    const firstToggle = await app.inject({
+      method: "POST",
+      url: `${packagePath}/star/toggle`,
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(firstToggle.statusCode).toBe(200);
+    expect(firstToggle.json()).toMatchObject({
+      starred: true,
+      stats: {
+        stars: 1,
+      },
+    });
+
+    const starState = await app.inject({
+      method: "GET",
+      url: `${packagePath}/star`,
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(starState.statusCode).toBe(200);
+    expect(starState.json()).toEqual({ starred: true });
+
+    const highlights = await app.inject({
+      method: "GET",
+      url: "/api/v1/stars",
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(highlights.statusCode).toBe(200);
+    expect(highlights.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "@openkova/context-bridge",
+        }),
+      ]),
+    );
+
+    const comment = await app.inject({
+      method: "POST",
+      url: `${packagePath}/comments`,
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { body: "Works well in a local Kova gateway." },
+    });
+    expect(comment.statusCode).toBe(201);
+    expect(comment.json().comment).toMatchObject({
+      packageName: "@openkova/context-bridge",
+      user: { handle: "tester" },
+      body: "Works well in a local Kova gateway.",
+    });
+
+    const comments = await app.inject(`${packagePath}/comments`);
+    expect(comments.statusCode).toBe(200);
+    expect(comments.json().items).toEqual([
+      expect.objectContaining({
+        body: "Works well in a local Kova gateway.",
+      }),
+    ]);
+
+    const report = await app.inject({
+      method: "POST",
+      url: `${packagePath}/report`,
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { reason: "Please re-check the compatibility metadata." },
+    });
+    expect(report.statusCode).toBe(201);
+    expect(report.json().report).toMatchObject({
+      packageName: "@openkova/context-bridge",
+      user: { handle: "tester" },
+      reason: "Please re-check the compatibility metadata.",
+    });
+
+    const secondToggle = await app.inject({
+      method: "POST",
+      url: `${packagePath}/star/toggle`,
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    expect(secondToggle.statusCode).toBe(200);
+    expect(secondToggle.json()).toMatchObject({
+      starred: false,
+      stats: {
+        stars: 0,
+      },
+    });
+    await app.close();
+  });
+
   it("allows browser clients to revoke API tokens", async () => {
     const app = await buildServer();
     const jwt = await signInWithGitHub(app);
