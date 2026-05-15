@@ -447,16 +447,6 @@ code {
   width: 100%;
 }
 
-.github-action {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: #f5f5f5;
-  color: #111;
-}
-
-.github-action:hover {
-  background: #fff;
-}
-
 .pill {
   gap: 6px;
   min-height: 28px;

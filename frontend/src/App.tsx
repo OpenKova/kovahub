@@ -302,18 +302,13 @@ function InfoCell({ label, value }: { label: string; value: string }) {
 }
 
 function AuthPanel() {
-  const returnTo = `${window.location.pathname}${window.location.search}`;
-
   return (
     <section className="auth-card">
       <div className="section-title">
-        <Github size={17} aria-hidden="true" />
-        <h2>Sign in to KovaHub</h2>
+        <KeyRound size={17} aria-hidden="true" />
+        <h2>Sign in required</h2>
       </div>
-      <a className="primary-action github-action full" href={githubLoginUrl(returnTo)}>
-        <Github size={16} aria-hidden="true" />
-        Continue with GitHub
-      </a>
+      <p className="muted">Publisher authentication is required.</p>
     </section>
   );
 }
