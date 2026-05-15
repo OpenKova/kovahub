@@ -5,18 +5,78 @@ import { buildServer } from "../src/server.js";
 
 const multipartBoundary = "----kovahub-test-boundary";
 
-async function registerAndLogin(app: Awaited<ReturnType<typeof buildServer>>) {
-  const response = await app.inject({
-    method: "POST",
-    url: "/api/v1/auth/register",
-    payload: {
-      handle: "tester",
-      email: "tester@example.com",
-      password: "correct-horse",
-    },
-  });
-  expect(response.statusCode).toBe(200);
-  return response.json<{ token: string }>().token;
+async function signInWithGitHub(app: Awaited<ReturnType<typeof buildServer>>) {
+  const previousClientId = process.env.GITHUB_CLIENT_ID;
+  const previousClientSecret = process.env.GITHUB_CLIENT_SECRET;
+  const previousSite = process.env.KOVAHUB_SITE;
+  const previousRegistry = process.env.KOVAHUB_REGISTRY;
+  const originalFetch = globalThis.fetch;
+
+  process.env.GITHUB_CLIENT_ID = "test-github-client";
+  process.env.GITHUB_CLIENT_SECRET = "test-github-secret";
+  process.env.KOVAHUB_SITE = "http://localhost:5173";
+  process.env.KOVAHUB_REGISTRY = "http://localhost:8787";
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url === "https://github.com/login/oauth/access_token") {
+      return new Response(JSON.stringify({ access_token: "gho_test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url === "https://api.github.com/user") {
+      return new Response(
+        JSON.stringify({
+          id: 10_000,
+          login: "tester",
+          name: "Tester",
+          avatar_url: "https://avatars.example/tester.png",
+          email: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url === "https://api.github.com/user/emails") {
+      return new Response(
+        JSON.stringify([{ email: "tester@example.com", primary: true, verified: true }]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    throw new Error(`Unexpected GitHub fetch: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const start = await app.inject("/api/v1/auth/github/start?returnTo=%2Fpublish");
+    expect(start.statusCode).toBe(302);
+    const authorize = new URL(start.headers.location as string);
+    const state = authorize.searchParams.get("state");
+    expect(state).toEqual(expect.any(String));
+    const setCookie = start.headers["set-cookie"];
+    const stateCookie = Array.isArray(setCookie) ? setCookie[0] : String(setCookie);
+    const cookieHeader = stateCookie.split(";")[0];
+
+    const callback = await app.inject({
+      method: "GET",
+      url: `/api/v1/auth/github/callback?code=oauth-code&state=${state}`,
+      headers: { cookie: cookieHeader },
+    });
+    expect(callback.statusCode).toBe(302);
+    const frontendCallback = new URL(callback.headers.location as string);
+    const token = new URLSearchParams(frontendCallback.hash.slice(1)).get("token");
+    expect(token).toEqual(expect.any(String));
+    return token as string;
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousClientId === undefined) delete process.env.GITHUB_CLIENT_ID;
+    else process.env.GITHUB_CLIENT_ID = previousClientId;
+    if (previousClientSecret === undefined) delete process.env.GITHUB_CLIENT_SECRET;
+    else process.env.GITHUB_CLIENT_SECRET = previousClientSecret;
+    if (previousSite === undefined) delete process.env.KOVAHUB_SITE;
+    else process.env.KOVAHUB_SITE = previousSite;
+    if (previousRegistry === undefined) delete process.env.KOVAHUB_REGISTRY;
+    else process.env.KOVAHUB_REGISTRY = previousRegistry;
+  }
 }
 
 async function createApiToken(app: Awaited<ReturnType<typeof buildServer>>, jwt: string) {
@@ -187,7 +247,7 @@ describe("registry api", () => {
 
   it("publishes a plugin package with latest tag and downloadable archive", async () => {
     const app = await buildServer();
-    const token = await registerAndLogin(app);
+    const token = await signInWithGitHub(app);
 
     const publish = await app.inject({
       method: "POST",
@@ -228,7 +288,7 @@ describe("registry api", () => {
 
   it("returns package version history with a single latest tag", async () => {
     const app = await buildServer();
-    const token = await registerAndLogin(app);
+    const token = await signInWithGitHub(app);
     const basePayload = {
       name: "@tester/versioned-plugin",
       displayName: "Versioned Plugin",
@@ -294,7 +354,7 @@ describe("registry api", () => {
 
   it("rejects plugin publishes without compatibility metadata", async () => {
     const app = await buildServer();
-    const token = await registerAndLogin(app);
+    const token = await signInWithGitHub(app);
     const publish = await app.inject({
       method: "POST",
       url: "/api/v1/packages",
@@ -312,7 +372,7 @@ describe("registry api", () => {
 
   it("rejects scoped skill names that Kova cannot install as slugs", async () => {
     const app = await buildServer();
-    const token = await registerAndLogin(app);
+    const token = await signInWithGitHub(app);
     const publish = await app.inject({
       method: "POST",
       url: "/api/v1/packages",
@@ -331,7 +391,7 @@ describe("registry api", () => {
 
   it("creates API tokens and accepts them for package publishing", async () => {
     const app = await buildServer();
-    const jwt = await registerAndLogin(app);
+    const jwt = await signInWithGitHub(app);
     const { token: apiToken } = await createApiToken(app, jwt);
 
     const publish = await app.inject({
@@ -364,7 +424,7 @@ describe("registry api", () => {
 
   it("allows browser clients to revoke API tokens", async () => {
     const app = await buildServer();
-    const jwt = await registerAndLogin(app);
+    const jwt = await signInWithGitHub(app);
     const { apiToken } = await createApiToken(app, jwt);
 
     const preflight = await app.inject({
@@ -499,7 +559,7 @@ describe("registry api", () => {
 
   it("publishes a Kova plugin archive from multipart upload", async () => {
     const app = await buildServer();
-    const jwt = await registerAndLogin(app);
+    const jwt = await signInWithGitHub(app);
     const archive = buildKovaPluginArchive();
     const multipart = buildMultipartArchivePayload({
       archive,

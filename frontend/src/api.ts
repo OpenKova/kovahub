@@ -87,20 +87,6 @@ export async function publishArchivePackage(file: File, metadata: PublishArchive
   });
 }
 
-export async function register(input: { handle: string; email: string; password: string }) {
-  return request<{ token: string; user: AuthUser }>("/api/v1/auth/register", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function login(input: { email: string; password: string }) {
-  return request<{ token: string; user: AuthUser }>("/api/v1/auth/login", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
 export async function fetchMe() {
   return request<{ user: AuthUser }>("/api/v1/auth/me");
 }
