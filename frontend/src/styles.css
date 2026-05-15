@@ -30,10 +30,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background:
-    linear-gradient(180deg, rgba(249, 115, 22, 0.08), transparent 280px),
-    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.06), transparent 26rem),
-    var(--bg);
+  background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 14px;
@@ -114,6 +111,7 @@ button {
 .brand-mark {
   width: 34px;
   height: 34px;
+  border: 0;
   border-radius: 8px;
 }
 
@@ -240,9 +238,9 @@ button {
   overflow: hidden;
   width: 34px;
   height: 34px;
+  border: 0;
   border-radius: 8px;
   background: #0b0807;
-  box-shadow: 0 1px 10px rgba(44, 28, 20, 0.16);
 }
 
 .home-brand-mark img {
@@ -395,7 +393,7 @@ button {
   border-bottom: 1px solid rgba(118, 88, 64, 0.16);
   padding: 68px 48px 48px;
   text-align: center;
-  background: linear-gradient(180deg, #fdfaf6 0%, #fbf3ea 100%);
+  background: var(--hv2-bg);
 }
 
 .home-v2-hero > *:not(.home-v2-hero-bg) {
@@ -413,9 +411,8 @@ button {
 .home-v2-glow {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(ellipse at 38% 30%, rgba(249, 115, 22, 0.09), transparent 46%),
-    radial-gradient(ellipse at 70% 70%, rgba(210, 160, 110, 0.12), transparent 50%);
+  display: none;
+  background: transparent;
   animation: home-v2-glowShift 16s ease-in-out infinite alternate;
 }
 
@@ -431,14 +428,16 @@ button {
 .home-v2-dots {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(circle, rgba(160, 120, 80, 0.12) 1px, transparent 1px);
+  display: none;
+  background-image: none;
   background-size: 32px 32px;
-  mask-image: radial-gradient(ellipse at 50% 40%, black 20%, transparent 70%);
-  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, black 20%, transparent 70%);
+  mask-image: none;
+  -webkit-mask-image: none;
 }
 
 .home-v2-ring {
   position: absolute;
+  display: none;
   border: 1px solid rgba(180, 130, 90, 0.08);
   border-radius: 999px;
   animation: home-v2-ringFloat 20s ease-in-out infinite;
@@ -715,12 +714,12 @@ button {
 
 .home-v2-carousel-wrap::before {
   left: 0;
-  background: linear-gradient(to right, var(--hv2-bg), transparent);
+  background: none;
 }
 
 .home-v2-carousel-wrap::after {
   right: 0;
-  background: linear-gradient(to left, var(--hv2-bg), transparent);
+  background: none;
 }
 
 .home-v2-carousel-track {
@@ -990,7 +989,6 @@ button {
 
 .home-page[data-theme="dark"] .home-brand-mark {
   background: #21160f;
-  box-shadow: 0 1px 18px rgba(249, 115, 22, 0.16);
 }
 
 .home-page[data-theme="dark"] .home-nav-search,
@@ -1052,17 +1050,15 @@ button {
 
 .home-page[data-theme="dark"] .home-v2-hero {
   border-bottom-color: rgba(255, 237, 213, 0.12);
-  background: linear-gradient(180deg, #191109 0%, #110c08 100%);
+  background: #110c08;
 }
 
 .home-page[data-theme="dark"] .home-v2-glow {
-  background:
-    radial-gradient(ellipse at 38% 30%, rgba(249, 115, 22, 0.16), transparent 46%),
-    radial-gradient(ellipse at 70% 70%, rgba(180, 83, 9, 0.18), transparent 50%);
+  background: transparent;
 }
 
 .home-page[data-theme="dark"] .home-v2-dots {
-  background-image: radial-gradient(circle, rgba(251, 191, 36, 0.12) 1px, transparent 1px);
+  background-image: none;
 }
 
 .home-page[data-theme="dark"] .home-v2-ring {
@@ -1818,7 +1814,7 @@ code {
   min-height: 40px;
   border: 1px solid rgba(249, 115, 22, 0.55);
   border-radius: 8px;
-  background: linear-gradient(180deg, #f97316, #9a3412);
+  background: #c2410c;
   color: #fff;
   padding: 0 14px;
   font-weight: 800;
