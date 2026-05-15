@@ -61,6 +61,7 @@ pnpm exec playwright install chromium
 Implemented in the scaffold:
 
 - Account registration, login, and bearer-token auth.
+- API token creation and bearer-token publishing for CLI/client integrations.
 - Publish package endpoint for `skill`, `code-plugin`, and `bundle-plugin`.
 - Optional Postgres persistence for users, packages, versions, files, and package stats.
 - Durable local archive storage for persistent mode.
@@ -91,19 +92,35 @@ Auth and publish routes:
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/auth/tokens`
+- `POST /api/v1/auth/tokens`
+- `DELETE /api/v1/auth/tokens/:id`
 - `POST /api/v1/packages`
+
+Create an API token with a session JWT, then use the returned `khp_...` token as a bearer token for publishing:
+
+```bash
+curl -X POST http://localhost:8787/api/v1/auth/tokens \
+  -H "authorization: Bearer $KOVAHUB_JWT" \
+  -H "content-type: application/json" \
+  -d '{"name":"local cli"}'
+
+curl -X POST http://localhost:8787/api/v1/packages \
+  -H "authorization: Bearer $KOVAHUB_API_TOKEN" \
+  -H "content-type: application/json" \
+  -d @package-publish.json
+```
 
 ## Next MVP Steps
 
-1. Add API token auth for CLI publishing.
-2. Add multipart archive publishing and server-side package inspection.
-3. Validate plugin package metadata from `package.json`:
+1. Add multipart archive publishing and server-side package inspection.
+2. Validate plugin package metadata from `package.json`:
    - `openclaw.compat.pluginApi`
    - `openclaw.compat.minGatewayVersion`
    - `openclaw.build.openclawVersion`
-4. Add S3/R2-compatible archive storage for hosted deployments.
-5. Add moderation/security scan placeholders before packages become public.
-6. Add pagination, tags, owner pages, and version history to the frontend.
+3. Add S3/R2-compatible archive storage for hosted deployments.
+4. Add moderation/security scan placeholders before packages become public.
+5. Add pagination, tags, owner pages, and version history to the frontend.
 
 ## References
 
