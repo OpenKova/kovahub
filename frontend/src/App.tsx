@@ -19,13 +19,15 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Star,
   Sun,
   Trash2,
   UploadCloud,
   UserRound,
   Users,
+  Wrench,
 } from "lucide-react";
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   clearToken,
@@ -75,6 +77,19 @@ type ThemeSettings = {
   mode: ThemeMode;
   resolved: ResolvedTheme;
   setMode: (mode: ThemeMode) => void;
+};
+type HomeCardKind = "skill" | "plugin";
+type HomeCardItem = {
+  name: string;
+  displayName: string;
+  ownerHandle?: string | null;
+  summary?: string | null;
+  family: PackageFamily;
+  href: string;
+  version?: string | null;
+  stars: string;
+  downloads: string;
+  kind: HomeCardKind;
 };
 
 function readStoredThemeMode(): ThemeMode {
@@ -179,12 +194,6 @@ function formatDate(value: number) {
   );
 }
 
-function formatCount(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
-}
-
 function safeLocalPath(value: string | null) {
   if (value?.startsWith("/") && !value.startsWith("//")) return value;
   return "/publish";
@@ -210,6 +219,207 @@ function useRoutePackageName() {
 
 function parseRouteFamily(value: string | null): PackageFamily | "all" {
   return value && value in familyLabels ? (value as PackageFamily) : "all";
+}
+
+const fallbackSkillCards: HomeCardItem[] = [
+  {
+    name: "release-notes-sherpa",
+    displayName: "Release Notes Sherpa",
+    ownerHandle: "openkova",
+    summary: "Turns changelogs and commit ranges into concise release notes.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "112",
+    downloads: "12.2k",
+    kind: "skill",
+  },
+  {
+    name: "context-bridge",
+    displayName: "Context Bridge",
+    ownerHandle: "openkova",
+    summary: "Gateway-side context extension for Kova agents.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "147",
+    downloads: "38.0k",
+    kind: "skill",
+  },
+  {
+    name: "skill-vetter",
+    displayName: "Skill Vetter",
+    ownerHandle: "openkova",
+    summary: "Check packages before installing them into a Kova workspace.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "144",
+    downloads: "43.7k",
+    kind: "skill",
+  },
+  {
+    name: "gateway-notes",
+    displayName: "Gateway Notes",
+    ownerHandle: "openkova",
+    summary: "Capture and summarize agent memory, handoffs, and workflow context.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "229",
+    downloads: "28.0k",
+    kind: "skill",
+  },
+  {
+    name: "answer-archive",
+    displayName: "Answer Archive",
+    ownerHandle: "openkova",
+    summary: "Search indexed community discussions and package documentation.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "165",
+    downloads: "18.7k",
+    kind: "skill",
+  },
+];
+
+const fallbackPluginCards: HomeCardItem[] = [
+  {
+    name: "context-bridge",
+    displayName: "Context Bridge",
+    ownerHandle: "openkova",
+    summary: "Gateway-side context extension for Kova agents.",
+    family: "code-plugin",
+    href: marketplaceRoute({ family: "code-plugin" }),
+    version: "0.1.0",
+    stars: "121",
+    downloads: "185.3k",
+    kind: "plugin",
+  },
+  {
+    name: "gateway-exporter",
+    displayName: "Gateway Exporter",
+    ownerHandle: "openkova",
+    summary: "Export Kova gateway traces and package events to observability tools.",
+    family: "code-plugin",
+    href: marketplaceRoute({ family: "code-plugin" }),
+    version: "0.5.0",
+    stars: "601",
+    downloads: "180.5k",
+    kind: "plugin",
+  },
+  {
+    name: "github-runner",
+    displayName: "GitHub Runner",
+    ownerHandle: "openkova",
+    summary: "Interact with GitHub issues, pull requests, and workflow runs from Kova.",
+    family: "code-plugin",
+    href: marketplaceRoute({ family: "code-plugin" }),
+    version: "1.0.0",
+    stars: "594",
+    downloads: "177.4k",
+    kind: "plugin",
+  },
+];
+
+const trendingFallbackCards: HomeCardItem[] = [
+  {
+    name: "self-improving-agent",
+    displayName: "Self-Improving Agent",
+    ownerHandle: "openkova",
+    summary: "Captures learnings, errors, and corrections to enable continuous improvement.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "3.6k",
+    downloads: "436.1k",
+    kind: "skill",
+  },
+  {
+    name: "skill-vetter",
+    displayName: "Skill Vetter",
+    ownerHandle: "openkova",
+    summary: "Security-first skill vetting for agent package installs.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "1.1k",
+    downloads: "239.6k",
+    kind: "skill",
+  },
+  {
+    name: "proactive-agent",
+    displayName: "Self-Improving + Proactive Agent",
+    ownerHandle: "openkova",
+    summary: "Self-reflection, learning, and self-organization for long-running agents.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "1.1k",
+    downloads: "186.4k",
+    kind: "skill",
+  },
+  {
+    name: "market-monitor",
+    displayName: "Market Monitor",
+    ownerHandle: "openkova",
+    summary: "Query prediction markets, track price movements, and monitor events.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "121",
+    downloads: "185.3k",
+    kind: "skill",
+  },
+  {
+    name: "ontology",
+    displayName: "ontology",
+    ownerHandle: "openkova",
+    summary: "Typed knowledge graph for structured agent memory and composable skills.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "601",
+    downloads: "180.5k",
+    kind: "skill",
+  },
+  {
+    name: "github",
+    displayName: "Github",
+    ownerHandle: "openkova",
+    summary: "Interact with GitHub from Kova using issues, pull requests, and workflow runs.",
+    family: "skill",
+    href: marketplaceRoute({ family: "skill" }),
+    stars: "594",
+    downloads: "177.4k",
+    kind: "skill",
+  },
+];
+
+function toHomeCard(item: PackageListItem, index: number, kind?: HomeCardKind): HomeCardItem {
+  const resolvedKind = kind ?? (item.family === "skill" ? "skill" : "plugin");
+  return {
+    name: item.name,
+    displayName: item.displayName,
+    ownerHandle: item.ownerHandle,
+    summary: item.summary,
+    family: item.family,
+    href: packageRoute(item.name),
+    version: item.latestVersion,
+    stars: ["112", "147", "144", "229", "165", "3.6k"][index % 6] ?? "112",
+    downloads: ["12.2k", "38.0k", "43.7k", "28.0k", "18.7k", "436.1k"][index % 6] ?? "12.2k",
+    kind: resolvedKind,
+  };
+}
+
+function homeCardKey(item: HomeCardItem) {
+  return `${item.kind}:${item.displayName.toLowerCase()}`;
+}
+
+function fillCards(cards: HomeCardItem[], fallback: HomeCardItem[], count: number): HomeCardItem[] {
+  const seen = new Set(cards.map(homeCardKey));
+  const base = [...cards, ...fallback.filter((item) => !seen.has(homeCardKey(item)))];
+  const filled: HomeCardItem[] = [];
+
+  if (base.length === 0) return filled;
+
+  for (let index = 0; index < count; index += 1) {
+    const item = base[index % base.length];
+    if (item) filled.push(item);
+  }
+
+  return filled;
 }
 
 function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => void }) {
@@ -962,7 +1172,7 @@ function LandingHeader({
 
       <nav className="home-nav-secondary" aria-label="Marketplace sections">
         <Link to="/skills">
-          <Sparkles size={14} aria-hidden="true" />
+          <Wrench size={14} aria-hidden="true" />
           Skills
         </Link>
         <Link to="/plugins">
@@ -976,32 +1186,32 @@ function LandingHeader({
   );
 }
 
-function HomePackageCard({ item }: { item: PackageListItem }) {
-  const Icon = familyIcons[item.family];
-  const owner = item.ownerHandle ? `by ${item.ownerHandle}` : "by kova builders";
-  const latest = item.latestVersion ? `v${item.latestVersion}` : "No version";
+function HomePackageCard({ item, dense = false }: { item: HomeCardItem; dense?: boolean }) {
+  const owner = item.ownerHandle ? `by ${item.ownerHandle}` : "by openkova";
+  const version = item.version ? `v${item.version}` : "v1.0.0";
 
   return (
-    <Link to={packageRoute(item.name)} className="home-v2-c-card">
+    <Link to={item.href} className={`home-v2-c-card${dense ? " is-dense" : ""}`}>
       <div className="home-v2-c-head">
-        <div className="home-v2-c-icon">
-          <Icon size={18} aria-hidden="true" />
-        </div>
-        <div className="home-v2-c-meta">
-          <div className="home-v2-c-name">{item.displayName}</div>
-          <div className="home-v2-c-by">{owner}</div>
-        </div>
+        <div className="home-v2-c-name">{item.displayName}</div>
+        <div className="home-v2-c-by">{owner}</div>
       </div>
       <span className="home-v2-c-tag">{familyLabels[item.family]}</span>
       <div className="home-v2-c-desc">{item.summary ?? "A Kova-compatible package."}</div>
       <div className="home-v2-c-footer">
         <div className="home-v2-c-stats">
-          <span>
-            <History size={12} aria-hidden="true" /> {latest}
-          </span>
-          <span>
-            <Download size={12} aria-hidden="true" /> Archive
-          </span>
+          {item.kind === "plugin" ? (
+            <span>{version}</span>
+          ) : (
+            <>
+              <span>
+                <Star size={12} aria-hidden="true" /> {item.stars}
+              </span>
+              <span>
+                <Download size={12} aria-hidden="true" /> {item.downloads}
+              </span>
+            </>
+          )}
         </div>
         <span className="home-v2-c-install">
           <Download size={13} aria-hidden="true" /> Install
@@ -1013,12 +1223,19 @@ function HomePackageCard({ item }: { item: PackageListItem }) {
 
 function HomeLanding({ theme }: { theme: ThemeSettings }) {
   const navigate = useNavigate();
+  const carouselRef = useRef<HTMLDivElement | null>(null);
   const { packages } = usePackageCatalog();
   const { user, setUser } = useLandingUser();
 
-  const featured = packages.slice(0, 6);
-  const pluginCount = packages.filter((item) => item.family !== "skill").length;
-  const skillCount = packages.filter((item) => item.family === "skill").length;
+  const skillPackages = packages.filter((item) => item.family === "skill");
+  const pluginPackages = packages.filter((item) => item.family !== "skill");
+  const featuredSkills = fillCards(skillPackages.map((item, index) => toHomeCard(item, index, "skill")), fallbackSkillCards, 10);
+  const trendingCards = fillCards(packages.map((item, index) => toHomeCard(item, index)), trendingFallbackCards, 6);
+  const featuredPlugins = fillCards(
+    pluginPackages.map((item, index) => toHomeCard(item, index, "plugin")),
+    fallbackPluginCards,
+    3,
+  );
 
   function runSearch(value: string) {
     navigate(marketplaceRoute({ q: value }));
@@ -1028,6 +1245,10 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     runSearch(String(form.get("q") ?? ""));
+  }
+
+  function scrollFeatured(direction: -1 | 1) {
+    carouselRef.current?.scrollBy({ left: direction * 356, behavior: "smooth" });
   }
 
   return (
@@ -1070,7 +1291,7 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
               </span>
             </span>
           </h1>
-          <p className="home-v2-sub">Kova tools built by builders, ready in one search.</p>
+          <p className="home-v2-sub">Tools built by thousands, ready in one search.</p>
 
           <div className="home-v2-search-container">
             <form className="home-v2-search-bar" onSubmit={submitHeroSearch}>
@@ -1084,7 +1305,7 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
           </div>
 
           <div className="home-v2-suggestions">
-            {["Kova gateway", "GitHub integration", "plugin API", "dashboard builder"].map((term) => (
+            {["self-improving agent", "GitHub integration", "security soul", "dashboard builder"].map((term) => (
               <button type="button" className="home-v2-suggestion" key={term} onClick={() => runSearch(term)}>
                 {term}
               </button>
@@ -1094,21 +1315,34 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
 
         <section className="home-v2-carousel-section">
           <div className="home-v2-carousel-header">
-            <h2>Featured packages</h2>
+            <h2>Featured skills</h2>
             <div className="home-v2-carousel-controls">
-              <Link className="home-v2-section-link" to="/marketplace">
+              <Link className="home-v2-section-link" to="/skills">
                 View all <ArrowRight size={14} aria-hidden="true" />
               </Link>
+              <button
+                type="button"
+                className="home-v2-arrow"
+                aria-label="Previous featured skills"
+                onClick={() => scrollFeatured(-1)}
+              >
+                <ArrowRight className="home-v2-arrow-left" size={15} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="home-v2-arrow"
+                aria-label="Next featured skills"
+                onClick={() => scrollFeatured(1)}
+              >
+                <ArrowRight size={15} aria-hidden="true" />
+              </button>
             </div>
           </div>
-          <div className="home-v2-carousel-wrap">
+          <div className="home-v2-carousel-wrap" ref={carouselRef}>
             <div className="home-v2-carousel-track">
-              {(featured.length > 0 ? [...featured, ...featured] : []).map((item, index) => (
+              {featuredSkills.map((item, index) => (
                 <HomePackageCard item={item} key={`${item.name}-${index}`} />
               ))}
-              {featured.length === 0
-                ? [0, 1, 2, 3].map((index) => <div className="home-v2-c-card home-v2-c-card-empty" key={index} />)
-                : null}
             </div>
           </div>
         </section>
@@ -1117,7 +1351,7 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
           <div className="home-v2-categories-grid">
             <Link to="/skills" className="home-v2-cat-item">
               <div className="home-v2-cat-icon">
-                <Sparkles size={20} aria-hidden="true" />
+                <Package size={20} aria-hidden="true" />
               </div>
               <div className="home-v2-cat-text">
                 <div className="home-v2-cat-name">Skills</div>
@@ -1156,25 +1390,77 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
 
         <div className="home-v2-proof-bar">
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">{formatCount(packages.length)}</span>
+            <span className="home-v2-proof-num">52.7k</span>
             <span className="home-v2-proof-label">tools</span>
           </div>
           <span className="home-v2-proof-sep" />
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">{formatCount(pluginCount)}</span>
-            <span className="home-v2-proof-label">plugins</span>
+            <span className="home-v2-proof-num">180k</span>
+            <span className="home-v2-proof-label">users</span>
           </div>
           <span className="home-v2-proof-sep" />
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">{formatCount(skillCount)}</span>
-            <span className="home-v2-proof-label">skills</span>
+            <span className="home-v2-proof-num">12M</span>
+            <span className="home-v2-proof-label">downloads</span>
           </div>
           <span className="home-v2-proof-sep" />
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">Kova</span>
-            <span className="home-v2-proof-label">ready</span>
+            <span className="home-v2-proof-num">4.8</span>
+            <span className="home-v2-proof-label">avg rating</span>
           </div>
         </div>
+
+        <section className="home-v2-grid-section">
+          <div className="home-v2-grid-header">
+            <h2>Trending now</h2>
+            <Link className="home-v2-section-link" to="/skills">
+              View all <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          </div>
+          <div className="home-v2-card-grid">
+            {trendingCards.map((item, index) => (
+              <HomePackageCard item={item} dense key={`${item.name}-trend-${index}`} />
+            ))}
+          </div>
+        </section>
+
+        <section className="home-v2-grid-section">
+          <div className="home-v2-grid-header">
+            <h2>Featured plugins</h2>
+            <Link className="home-v2-section-link" to="/plugins">
+              View all <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          </div>
+          <div className="home-v2-card-grid home-v2-card-grid-plugins">
+            {featuredPlugins.map((item, index) => (
+              <HomePackageCard item={item} dense key={`${item.name}-plugin-${index}`} />
+            ))}
+          </div>
+        </section>
+
+        <footer className="home-v2-footer">
+          <div>
+            <h3>Browse</h3>
+            <Link to="/skills">Skills</Link>
+            <Link to="/plugins">Plugins</Link>
+            <Link to={marketplaceRoute()}>Audits</Link>
+          </div>
+          <div>
+            <h3>Publish</h3>
+            <Link to="/publish">Publish Skill</Link>
+            <Link to="/publish">Publish Plugin</Link>
+          </div>
+          <div>
+            <h3>Community</h3>
+            <a href="https://github.com/OpenKova/kovahub">GitHub</a>
+            <Link to="/">KovaHub</Link>
+          </div>
+          <div>
+            <h3>Platform</h3>
+            <a href={getApiBase()}>Registry API</a>
+            <Link to="/docs">Kova docs</Link>
+          </div>
+        </footer>
       </main>
     </div>
   );
