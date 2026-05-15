@@ -630,6 +630,86 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("supports organization publishers for package ownership", async () => {
+    const repo = new InMemoryRegistryRepository();
+    await repo.createUser({
+      handle: "teammate",
+      email: "teammate@example.com",
+      passwordHash: "test",
+    });
+    const app = await buildServer(repo);
+    const token = await signInWithGitHub(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/organizations",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        handle: "kova-labs",
+        displayName: "Kova Labs",
+        description: "Shared KovaHub publishing.",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().organization).toMatchObject({
+      handle: "kova-labs",
+      displayName: "Kova Labs",
+    });
+
+    const member = await app.inject({
+      method: "POST",
+      url: "/api/v1/organizations/kova-labs/members",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { handle: "teammate", role: "maintainer" },
+    });
+    expect(member.statusCode).toBe(200);
+    expect(member.json().member).toMatchObject({
+      organizationHandle: "kova-labs",
+      user: { handle: "teammate" },
+      role: "maintainer",
+    });
+
+    const mine = await app.inject({
+      method: "GET",
+      url: "/api/v1/me/organizations",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(mine.statusCode).toBe(200);
+    expect(mine.json().organizations).toEqual([
+      expect.objectContaining({ handle: "kova-labs" }),
+    ]);
+
+    const publish = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: "@kova-labs/team-plugin",
+        ownerHandle: "kova-labs",
+        displayName: "Team Plugin",
+        family: "code-plugin",
+        version: "0.1.0",
+        summary: "Published by a KovaHub organization.",
+        compatibility: {
+          pluginApi: "^1.0.0",
+          minGatewayVersion: "2026.3.0",
+        },
+      },
+    });
+    expect(publish.statusCode).toBe(201);
+    expect(publish.json().package).toMatchObject({
+      name: "@kova-labs/team-plugin",
+      ownerHandle: "kova-labs",
+    });
+
+    const listed = await app.inject("/api/v1/publishers/kova-labs/packages");
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().items).toEqual([
+      expect.objectContaining({ name: "@kova-labs/team-plugin" }),
+    ]);
+    await app.close();
+  });
+
   it("rejects plugin publishes without compatibility metadata", async () => {
     const app = await buildServer();
     const token = await signInWithGitHub(app);

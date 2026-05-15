@@ -35,6 +35,25 @@ export type UserAccount = AuthPrincipal & {
   createdAt: number;
 };
 
+export type OrganizationRole = "owner" | "maintainer" | "member";
+
+export type OrganizationRecord = {
+  id: string;
+  handle: string;
+  displayName: string;
+  description?: string | null;
+  createdAt: number;
+};
+
+export type OrganizationMemberRecord = {
+  organizationId: string;
+  organizationHandle: string;
+  userId: string;
+  userHandle: string;
+  role: OrganizationRole;
+  createdAt: number;
+};
+
 export type SessionPrincipal = AuthPrincipal & {
   githubId?: string | null;
   displayName?: string | null;
@@ -130,6 +149,12 @@ export type PackageModerationInput = {
   summary?: string | null;
 };
 
+export type OrganizationInput = {
+  handle: string;
+  displayName?: string;
+  description?: string | null;
+};
+
 export type RegistryRepository = {
   close?(): Promise<void>;
   createUser(input: { handle: string; email: string; passwordHash: string }): Promise<UserAccount>;
@@ -149,6 +174,11 @@ export type RegistryRepository = {
   listApiTokens(userId: string): Promise<ApiTokenRecord[]>;
   revokeApiToken(input: { userId: string; tokenId: string }): Promise<boolean>;
   findUserByApiTokenHash(tokenHash: string): Promise<AuthPrincipal | null>;
+  createOrganization(user: AuthPrincipal, input: OrganizationInput): Promise<OrganizationRecord>;
+  listUserOrganizations(userId: string): Promise<OrganizationRecord[]>;
+  getOrganizationByHandle(handle: string): Promise<OrganizationRecord | null>;
+  listOrganizationMembers(handle: string): Promise<OrganizationMemberRecord[]>;
+  addOrganizationMember(handle: string, actor: AuthPrincipal, memberHandle: string, role: OrganizationRole): Promise<OrganizationMemberRecord | null>;
   listPackages(options?: ListPackagesOptions): Promise<{ items: PackageListItem[]; nextCursor: string | null }>;
   searchPackages(options: SearchPackagesOptions): Promise<Array<{ score: number; package: PackageListItem }>>;
   getPackage(name: string): Promise<PackageRecord | null>;
@@ -266,14 +296,12 @@ export function normalizeTopics(values: string[] = []) {
   return [...new Set(values.map(normalizeTopic).filter(Boolean))];
 }
 
-function assertPackageOwner(pkg: PackageRecord, user: AuthPrincipal) {
-  if (normalizeKey(pkg.ownerHandle ?? "") !== normalizeKey(user.handle)) {
-    throw new Error("Only the package owner can manage this package.");
-  }
-}
-
 function latestActiveVersion(versions: PackageVersionRecord[]) {
   return versions.find((version) => !version.yankedAt) ?? null;
+}
+
+function canPublishForRole(role: OrganizationRole | null | undefined) {
+  return role === "owner" || role === "maintainer";
 }
 
 export function mergeVerification(
@@ -441,6 +469,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly usersByGithubId = new Map<string, string>();
   private readonly apiTokens = new Map<string, ApiTokenRecord>();
   private readonly apiTokensByHash = new Map<string, string>();
+  private readonly organizations = new Map<string, OrganizationRecord>();
+  private readonly organizationMembers = new Map<string, OrganizationMemberRecord>();
   private readonly packages = new Map<string, PackageRecord>();
   private readonly packageStars = new Map<string, { packageName: string; userId: string; createdAt: number }>();
   private readonly packageComments = new Map<string, PackageCommentRecord>();
@@ -625,6 +655,73 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     return user ? { id: user.id, handle: user.handle, email: user.email } : null;
   }
 
+  async createOrganization(user: AuthPrincipal, input: OrganizationInput) {
+    const handle = normalizeHandle(input.handle);
+    if (this.usersByHandle.has(handle) || this.organizations.has(handle)) {
+      throw new Error("Publisher handle is already taken.");
+    }
+    const createdAt = now();
+    const organization: OrganizationRecord = {
+      id: newId("org"),
+      handle,
+      displayName: input.displayName?.trim() || handle,
+      description: input.description ?? null,
+      createdAt,
+    };
+    this.organizations.set(handle, organization);
+    this.organizationMembers.set(this.organizationMemberKey(organization.id, user.id), {
+      organizationId: organization.id,
+      organizationHandle: organization.handle,
+      userId: user.id,
+      userHandle: user.handle,
+      role: "owner",
+      createdAt,
+    });
+    return organization;
+  }
+
+  async listUserOrganizations(userId: string) {
+    return [...this.organizationMembers.values()]
+      .filter((member) => member.userId === userId)
+      .map((member) => this.organizations.get(member.organizationHandle))
+      .filter((organization): organization is OrganizationRecord => Boolean(organization))
+      .sort((left, right) => left.displayName.localeCompare(right.displayName));
+  }
+
+  async getOrganizationByHandle(handle: string) {
+    return this.organizations.get(normalizeHandle(handle)) ?? null;
+  }
+
+  async listOrganizationMembers(handle: string) {
+    const organization = await this.getOrganizationByHandle(handle);
+    if (!organization) return [];
+    return [...this.organizationMembers.values()]
+      .filter((member) => member.organizationId === organization.id)
+      .sort((left, right) => {
+        const roleRank = { owner: 0, maintainer: 1, member: 2 };
+        return roleRank[left.role] - roleRank[right.role] || left.userHandle.localeCompare(right.userHandle);
+      });
+  }
+
+  async addOrganizationMember(handle: string, actor: AuthPrincipal, memberHandle: string, role: OrganizationRole) {
+    const organization = await this.getOrganizationByHandle(handle);
+    if (!organization) return null;
+    const actorRole = this.organizationMemberRole(organization.id, actor.id);
+    if (actorRole !== "owner") throw new Error("Only organization owners can manage members.");
+    const member = await this.findUserByHandle(memberHandle);
+    if (!member) throw new Error("User does not exist.");
+    const record: OrganizationMemberRecord = {
+      organizationId: organization.id,
+      organizationHandle: organization.handle,
+      userId: member.id,
+      userHandle: member.handle,
+      role,
+      createdAt: now(),
+    };
+    this.organizationMembers.set(this.organizationMemberKey(organization.id, member.id), record);
+    return record;
+  }
+
   async listPackages(options: ListPackagesOptions = {}) {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
     const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
@@ -685,9 +782,11 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     const topics = normalizeTopics(input.tags);
     const key = normalizeKey(input.name);
     const version = createPackageVersion({ payload: input, compatibility, capabilities });
+    const publisherHandle = await this.resolvePublisherHandle(input.ownerHandle, owner);
     const existing = this.packages.get(key);
 
     if (existing) {
+      this.assertCanManagePackage(existing, owner);
       if (existing.versions.some((candidate) => candidate.version === input.version)) {
         throw new Error(`Version ${input.version} already exists for ${input.name}.`);
       }
@@ -715,7 +814,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       channel: input.channel as PackageChannel,
       isOfficial: input.channel === "official",
       summary: input.summary ?? null,
-      ownerHandle: input.ownerHandle ?? owner.handle,
+      ownerHandle: publisherHandle,
       topics,
       createdAt: version.createdAt,
       updatedAt: version.createdAt,
@@ -743,7 +842,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   async updatePackageSettings(name: string, user: AuthPrincipal, input: PackageSettingsInput) {
     const pkg = await this.getPackage(name);
     if (!pkg) return null;
-    assertPackageOwner(pkg, user);
+    this.assertCanManagePackage(pkg, user);
     if (input.displayName !== undefined) pkg.displayName = input.displayName;
     if (input.summary !== undefined) pkg.summary = input.summary;
     if (input.tags !== undefined) pkg.topics = normalizeTopics(input.tags);
@@ -758,7 +857,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   async renamePackage(name: string, user: AuthPrincipal, newName: string) {
     const pkg = await this.getPackage(name);
     if (!pkg) return null;
-    assertPackageOwner(pkg, user);
+    this.assertCanManagePackage(pkg, user);
     const oldKey = normalizeKey(pkg.name);
     const nextKey = normalizeKey(newName);
     if (oldKey !== nextKey && this.packages.has(nextKey)) throw new Error("Package name is already taken.");
@@ -772,10 +871,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   async transferPackage(name: string, user: AuthPrincipal, targetHandle: string) {
     const pkg = await this.getPackage(name);
     if (!pkg) return null;
-    assertPackageOwner(pkg, user);
-    const target = await this.findUserByHandle(targetHandle);
-    if (!target) throw new Error("Target publisher does not exist.");
-    pkg.ownerHandle = target.handle;
+    this.assertCanManagePackage(pkg, user);
+    pkg.ownerHandle = await this.resolveTransferPublisherHandle(targetHandle, user);
     pkg.updatedAt = now();
     return pkg;
   }
@@ -783,7 +880,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   async setPackageDeleted(name: string, user: AuthPrincipal, deleted: boolean) {
     const pkg = await this.getPackage(name);
     if (!pkg) return null;
-    assertPackageOwner(pkg, user);
+    this.assertCanManagePackage(pkg, user);
     pkg.deletedAt = deleted ? now() : null;
     pkg.updatedAt = now();
     return pkg;
@@ -792,7 +889,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {
     const pkg = await this.getPackage(name);
     if (!pkg) return null;
-    assertPackageOwner(pkg, user);
+    this.assertCanManagePackage(pkg, user);
     const target = pkg.versions.find((candidate) => candidate.version === version);
     if (!target) return null;
     target.yankedAt = now();
@@ -986,6 +1083,38 @@ export class InMemoryRegistryRepository implements RegistryRepository {
 
   private packageStarKey(packageName: string, userId: string) {
     return `${normalizeKey(packageName)}:${userId}`;
+  }
+
+  private organizationMemberKey(organizationId: string, userId: string) {
+    return `${organizationId}:${userId}`;
+  }
+
+  private organizationMemberRole(organizationId: string, userId: string) {
+    return this.organizationMembers.get(this.organizationMemberKey(organizationId, userId))?.role ?? null;
+  }
+
+  private async resolvePublisherHandle(handle: string | undefined, user: AuthPrincipal) {
+    const requested = handle?.trim() ? normalizeHandle(handle) : user.handle;
+    if (normalizeKey(requested) === normalizeKey(user.handle)) return user.handle;
+    const organization = await this.getOrganizationByHandle(requested);
+    const role = organization ? this.organizationMemberRole(organization.id, user.id) : null;
+    if (!organization || !canPublishForRole(role)) {
+      throw new Error("You can only publish as yourself or an organization you maintain.");
+    }
+    return organization.handle;
+  }
+
+  private async resolveTransferPublisherHandle(handle: string, user: AuthPrincipal) {
+    const target = await this.findUserByHandle(handle);
+    if (target) return target.handle;
+    return this.resolvePublisherHandle(handle, user);
+  }
+
+  private assertCanManagePackage(pkg: PackageRecord, user: AuthPrincipal) {
+    if (normalizeKey(pkg.ownerHandle ?? "") === normalizeKey(user.handle)) return;
+    const organization = pkg.ownerHandle ? this.organizations.get(normalizeHandle(pkg.ownerHandle)) : null;
+    if (organization && canPublishForRole(this.organizationMemberRole(organization.id, user.id))) return;
+    throw new Error("Only the package owner can manage this package.");
   }
 
   private sortedPackages(sort?: ListPackagesOptions["sort"]) {

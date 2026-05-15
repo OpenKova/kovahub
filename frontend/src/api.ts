@@ -11,6 +11,8 @@ import type {
   PackageSort,
   PackageStarState,
   PackageStarToggleResult,
+  Organization,
+  OrganizationMember,
   ProfileUpdatePayload,
   PublishArchiveMetadata,
   PublishPayload,
@@ -109,6 +111,34 @@ export async function fetchOwnerPackages(params: { cursor?: string | null; limit
   if (params.cursor) query.set("cursor", params.cursor);
   query.set("limit", String(params.limit ?? 100));
   return request<{ items: PackageListItem[]; nextCursor: string | null }>(`/api/v1/me/packages?${query.toString()}`);
+}
+
+export async function fetchMyOrganizations() {
+  return request<{ organizations: Organization[] }>("/api/v1/me/organizations");
+}
+
+export async function createOrganization(payload: { handle: string; displayName?: string; description?: string | null }) {
+  return request<{ organization: Organization }>("/api/v1/organizations", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchOrganizationMembers(handle: string) {
+  return request<{ items: OrganizationMember[] }>(`/api/v1/organizations/${encodeURIComponent(handle)}/members`);
+}
+
+export async function addOrganizationMember(
+  handle: string,
+  payload: { handle: string; role: OrganizationMember["role"] },
+) {
+  return request<{ member: OrganizationMember | null }>(
+    `/api/v1/organizations/${encodeURIComponent(handle)}/members`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function fetchPackageStar(name: string) {

@@ -36,8 +36,10 @@ import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   clearToken,
+  createOrganization,
   createApiToken,
   deletePackage,
+  fetchMyOrganizations,
   fetchMe,
   fetchOwnerPackages,
   fetchPackageDetail,
@@ -73,6 +75,7 @@ import { kovaRoboLogo } from "./brandAssets";
 import type {
   AuthUser,
   ApiTokenSummary,
+  Organization,
   PackageComment,
   PackageDetail,
   PackageFamily,
@@ -1058,8 +1061,29 @@ function PublishPanel({
   const [archiveTags, setArchiveTags] = useState("");
   const [archivePluginApi, setArchivePluginApi] = useState("");
   const [archiveMinGatewayVersion, setArchiveMinGatewayVersion] = useState("");
+  const [publisherHandle, setPublisherHandle] = useState("self");
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setOrganizations([]);
+      setPublisherHandle("self");
+      return;
+    }
+    let active = true;
+    fetchMyOrganizations()
+      .then((result) => {
+        if (active) setOrganizations(result.organizations);
+      })
+      .catch(() => {
+        if (active) setOrganizations([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1081,8 +1105,10 @@ function PublishPanel({
 
   async function publishComposedPackage() {
     const readmeText = optionalText(readme);
+    const ownerHandle = publisherHandle === "self" ? undefined : publisherHandle;
     const payload: PublishPayload = {
       name,
+      ownerHandle,
       displayName: optionalText(displayName),
       family,
       version,
@@ -1109,6 +1135,7 @@ function PublishPanel({
 
   async function publishArchive() {
     if (!archiveFile) throw new Error("Choose a ZIP archive to publish.");
+    const ownerHandle = publisherHandle === "self" ? undefined : publisherHandle;
     const compatibility =
       optionalText(archivePluginApi) || optionalText(archiveMinGatewayVersion)
         ? {
@@ -1118,6 +1145,7 @@ function PublishPanel({
         : undefined;
     const metadata: PublishArchiveMetadata = {
       name: optionalText(archiveName),
+      ownerHandle,
       displayName: optionalText(archiveDisplayName),
       family: archiveFamily === "auto" ? undefined : archiveFamily,
       version: optionalText(archiveVersion),
@@ -1143,6 +1171,17 @@ function PublishPanel({
         <UploadCloud size={17} aria-hidden="true" />
         <h2>Publish Package</h2>
       </div>
+      <label>
+        Publisher
+        <select value={publisherHandle} onChange={(event) => setPublisherHandle(event.target.value)}>
+          <option value="self">@{user.handle}</option>
+          {organizations.map((organization) => (
+            <option value={organization.handle} key={organization.id}>
+              @{organization.handle}
+            </option>
+          ))}
+        </select>
+      </label>
       <div className="mode-tabs" aria-label="Publish method">
         <button
           className={publishMethod === "compose" ? "is-active" : ""}
@@ -2063,6 +2102,94 @@ function ModerationPanel() {
   );
 }
 
+function OrganizationPanel() {
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [handle, setHandle] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetchMyOrganizations()
+      .then((result) => {
+        if (active) setOrganizations(result.organizations);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load organizations.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setStatus(null);
+    setError(null);
+    try {
+      const result = await createOrganization({
+        handle,
+        displayName: optionalText(displayName) ?? undefined,
+        description: optionalText(description),
+      });
+      setOrganizations((current) => [...current, result.organization]);
+      setHandle("");
+      setDisplayName("");
+      setDescription("");
+      setStatus("Organization created.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Organization creation failed.");
+    }
+  }
+
+  return (
+    <section className="content-section organization-panel">
+      <div className="content-section-head">
+        <h2>Organizations</h2>
+        <span>{organizations.length} teams</span>
+      </div>
+      <form className="organization-form" onSubmit={submit}>
+        <label>
+          Handle
+          <input value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="team-handle" />
+        </label>
+        <label>
+          Display name
+          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Team name" />
+        </label>
+        <label>
+          Description
+          <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this team publishes" />
+        </label>
+        <button className="primary-action" type="submit" disabled={!handle.trim()}>
+          Create organization
+        </button>
+      </form>
+      {loading ? <p className="content-muted">Loading organizations...</p> : null}
+      {status ? <p className="form-success">{status}</p> : null}
+      {error ? <p className="form-error">{error}</p> : null}
+      <div className="organization-list">
+        {organizations.map((organization) => (
+          <Link className="organization-row" to={publisherRoute(organization.handle)} key={organization.id}>
+            <span>
+              <strong>{organization.displayName}</strong>
+              <small>@{organization.handle}</small>
+            </span>
+            <ArrowRight size={15} aria-hidden="true" />
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DirectoryPage({ kind, theme }: { kind: "skills" | "plugins"; theme: ThemeSettings }) {
   const { packages, loading, error } = usePackageCatalog();
   const isSkills = kind === "skills";
@@ -2884,6 +3011,8 @@ function DashboardPage({ theme }: { theme: ThemeSettings }) {
         </article>
         <ApiTokenPanel user={user} />
       </section>
+
+      <OrganizationPanel />
 
       <ModerationPanel />
 

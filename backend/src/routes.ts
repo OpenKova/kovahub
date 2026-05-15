@@ -11,7 +11,15 @@ import {
 } from "./contracts.js";
 import { requireAuth } from "./auth.js";
 import { preparePublishInputFromArchive } from "./packageInspection.js";
-import type { AuthPrincipal, PackageCommentRecord, PackageReportRecord, RegistryRepository, UserAccount } from "./repository.js";
+import type {
+  AuthPrincipal,
+  OrganizationMemberRecord,
+  OrganizationRecord,
+  PackageCommentRecord,
+  PackageReportRecord,
+  RegistryRepository,
+  UserAccount,
+} from "./repository.js";
 
 const listQuerySchema = z.object({
   q: z.string().optional(),
@@ -36,6 +44,15 @@ const packageVersionParamsSchema = packageParamsSchema.extend({ version: z.strin
 const packageNameLike = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
 const skillParamsSchema = z.object({ slug: z.string().min(1) });
 const publisherParamsSchema = z.object({ handle: z.string().trim().min(1) });
+const organizationBodySchema = z.object({
+  handle: z.string().trim().min(1).max(80),
+  displayName: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+});
+const organizationMemberBodySchema = z.object({
+  handle: z.string().trim().min(1).max(80),
+  role: z.enum(["owner", "maintainer", "member"]).default("member"),
+});
 const tagParamsSchema = z.object({ tag: z.string().trim().min(1) });
 const versionListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
@@ -186,6 +203,28 @@ function publicPackageReport(report: PackageReportRecord) {
       : null,
     resolvedAt: report.resolvedAt ?? null,
     createdAt: report.createdAt,
+  };
+}
+
+function publicOrganization(organization: OrganizationRecord) {
+  return {
+    id: organization.id,
+    handle: organization.handle,
+    displayName: organization.displayName,
+    description: organization.description ?? null,
+    createdAt: organization.createdAt,
+  };
+}
+
+function publicOrganizationMember(member: OrganizationMemberRecord) {
+  return {
+    organizationHandle: member.organizationHandle,
+    user: {
+      id: member.userId,
+      handle: member.userHandle,
+    },
+    role: member.role,
+    createdAt: member.createdAt,
   };
 }
 
@@ -545,6 +584,86 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { report: null };
     }
     return { report: publicPackageReport(report) };
+  });
+
+  app.get("/api/v1/me/organizations", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const organizations = await repo.listUserOrganizations(user.id);
+    return { organizations: organizations.map(publicOrganization) };
+  });
+
+  app.post("/api/v1/organizations", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const body = organizationBodySchema.safeParse(request.body);
+    if (!body.success) {
+      reply.code(400);
+      return { error: body.error.issues[0]?.message ?? "Invalid organization payload." };
+    }
+    try {
+      const organization = await repo.createOrganization(user, body.data);
+      reply.code(201);
+      return { organization: publicOrganization(organization) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Organization creation failed." };
+    }
+  });
+
+  app.get("/api/v1/organizations/:handle", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid organization handle." };
+    }
+    const organization = await repo.getOrganizationByHandle(params.data.handle);
+    if (!organization) {
+      reply.code(404);
+      return { organization: null };
+    }
+    return { organization: publicOrganization(organization) };
+  });
+
+  app.get("/api/v1/organizations/:handle/members", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid organization handle." };
+    }
+    const organization = await repo.getOrganizationByHandle(params.data.handle);
+    if (!organization) {
+      reply.code(404);
+      return { items: [] };
+    }
+    const members = await repo.listOrganizationMembers(organization.handle);
+    return { items: members.map(publicOrganizationMember) };
+  });
+
+  app.post("/api/v1/organizations/:handle/members", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = publisherParamsSchema.safeParse(request.params);
+    const body = organizationMemberBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid organization member request."
+          : body.error.issues[0]?.message ?? "Invalid organization member payload.",
+      };
+    }
+    try {
+      const member = await repo.addOrganizationMember(params.data.handle, user, body.data.handle, body.data.role);
+      if (!member) {
+        reply.code(404);
+        return { member: null };
+      }
+      return { member: publicOrganizationMember(member) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Organization member update failed." };
+    }
   });
 
   app.get("/api/v1/profiles/:handle", async (request, reply) => {

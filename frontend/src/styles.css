@@ -2935,6 +2935,65 @@ label textarea {
   margin-bottom: 28px;
 }
 
+.organization-panel {
+  margin-bottom: 28px;
+}
+
+.organization-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+.organization-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--hv2-text-secondary, #52525b);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.organization-form input {
+  min-height: 38px;
+  border: 1px solid var(--hv2-border, rgba(24, 24, 27, 0.15));
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--hv2-text, #18181b);
+  padding: 0 10px;
+}
+
+.organization-list {
+  display: grid;
+  gap: 8px;
+}
+
+.organization-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--hv2-border, rgba(24, 24, 27, 0.15));
+  border-radius: 8px;
+  background: var(--hv2-surface, rgba(255, 255, 255, 0.52));
+  color: inherit;
+  padding: 12px 14px;
+}
+
+.organization-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.organization-row strong {
+  color: var(--hv2-text, #18181b);
+}
+
+.organization-row small {
+  color: var(--hv2-text-tertiary, #71717a);
+}
+
 .moderation-list {
   display: grid;
   gap: 10px;
@@ -3077,6 +3136,7 @@ label textarea {
   .compat-grid,
   .form-grid,
   .token-create-row,
+  .organization-form,
   .moderation-row,
   .audit-row {
     grid-template-columns: 1fr;

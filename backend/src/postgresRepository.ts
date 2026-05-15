@@ -25,6 +25,10 @@ import {
   type AuthPrincipal,
   type ListPackageReportsOptions,
   type ListPackagesOptions,
+  type OrganizationInput,
+  type OrganizationMemberRecord,
+  type OrganizationRecord,
+  type OrganizationRole,
   type PackageModerationInput,
   type PackageCommentRecord,
   type PackageReportRecord,
@@ -96,6 +100,23 @@ type ApiTokenRow = QueryResultRow & {
   last_used_at: Date | null;
 };
 
+type OrganizationRow = QueryResultRow & {
+  id: string;
+  handle: string;
+  display_name: string;
+  description: string | null;
+  created_at: Date;
+};
+
+type OrganizationMemberRow = QueryResultRow & {
+  organization_id: string;
+  organization_handle: string;
+  user_id: string;
+  user_handle: string;
+  role: OrganizationRole;
+  created_at: Date;
+};
+
 type PackageCommentRow = QueryResultRow & {
   id: string;
   package_name: string;
@@ -129,7 +150,7 @@ const packageColumns = `
     p.family,
     p.channel,
     p.owner_id,
-    u.handle as owner_handle,
+    coalesce(p.publisher_handle, u.handle) as owner_handle,
     p.summary,
     p.topics,
     p.runtime_id,
@@ -208,6 +229,17 @@ function normalizeStats(stats: Partial<PackageRecord["stats"]> | null): PackageR
   };
 }
 
+function normalizePublisherHandle(value: string) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-{2,}/g, "-") || "publisher"
+  );
+}
+
 function rowToUser(row: UserRow): UserAccount {
   return {
     id: row.id,
@@ -233,6 +265,27 @@ function rowToApiToken(row: ApiTokenRow): ApiTokenRecord {
     tokenHash: row.token_hash,
     createdAt: timeMs(row.created_at),
     lastUsedAt: row.last_used_at ? timeMs(row.last_used_at) : null,
+  };
+}
+
+function rowToOrganization(row: OrganizationRow): OrganizationRecord {
+  return {
+    id: row.id,
+    handle: row.handle,
+    displayName: row.display_name,
+    description: row.description,
+    createdAt: timeMs(row.created_at),
+  };
+}
+
+function rowToOrganizationMember(row: OrganizationMemberRow): OrganizationMemberRecord {
+  return {
+    organizationId: row.organization_id,
+    organizationHandle: row.organization_handle,
+    userId: row.user_id,
+    userHandle: row.user_handle,
+    role: row.role,
+    createdAt: timeMs(row.created_at),
   };
 }
 
@@ -559,6 +612,117 @@ export class PostgresRegistryRepository implements RegistryRepository {
     return result.rows[0] ?? null;
   }
 
+  async createOrganization(user: AuthPrincipal, input: OrganizationInput) {
+    const handle = normalizePublisherHandle(input.handle);
+    const userHandle = await this.findUserByHandle(handle);
+    if (userHandle) throw new Error("Publisher handle is already taken.");
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const inserted = await client.query<OrganizationRow>(
+        `
+          insert into organizations (handle, display_name, description)
+          values ($1, $2, $3)
+          returning id, handle, display_name, description, created_at
+        `,
+        [handle, input.displayName?.trim() || handle, input.description ?? null],
+      );
+      const organization = inserted.rows[0];
+      if (!organization) throw new Error("Organization creation failed.");
+      await client.query(
+        `
+          insert into organization_members (organization_id, user_id, role)
+          values ($1, $2, 'owner')
+        `,
+        [organization.id, user.id],
+      );
+      await client.query("commit");
+      return rowToOrganization(organization);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listUserOrganizations(userId: string) {
+    const result = await this.pool.query<OrganizationRow>(
+      `
+        select o.id, o.handle, o.display_name, o.description, o.created_at
+        from organizations o
+        join organization_members om on om.organization_id = o.id
+        where om.user_id = $1
+        order by o.display_name asc
+      `,
+      [userId],
+    );
+    return result.rows.map(rowToOrganization);
+  }
+
+  async getOrganizationByHandle(handle: string) {
+    const result = await this.pool.query<OrganizationRow>(
+      `
+        select id, handle, display_name, description, created_at
+        from organizations
+        where handle = $1
+        limit 1
+      `,
+      [normalizePublisherHandle(handle)],
+    );
+    const row = result.rows[0];
+    return row ? rowToOrganization(row) : null;
+  }
+
+  async listOrganizationMembers(handle: string) {
+    const result = await this.pool.query<OrganizationMemberRow>(
+      `
+        select
+          o.id as organization_id,
+          o.handle as organization_handle,
+          u.id as user_id,
+          u.handle as user_handle,
+          om.role,
+          om.created_at
+        from organization_members om
+        join organizations o on o.id = om.organization_id
+        join users u on u.id = om.user_id
+        where o.handle = $1
+        order by case om.role when 'owner' then 0 when 'maintainer' then 1 else 2 end, u.handle asc
+      `,
+      [normalizePublisherHandle(handle)],
+    );
+    return result.rows.map(rowToOrganizationMember);
+  }
+
+  async addOrganizationMember(handle: string, actor: AuthPrincipal, memberHandle: string, role: OrganizationRole) {
+    const organization = await this.getOrganizationByHandle(handle);
+    if (!organization) return null;
+    if ((await this.organizationRole(organization.id, actor.id)) !== "owner") {
+      throw new Error("Only organization owners can manage members.");
+    }
+    const member = await this.findUserByHandle(memberHandle);
+    if (!member) throw new Error("User does not exist.");
+    const result = await this.pool.query<OrganizationMemberRow>(
+      `
+        insert into organization_members (organization_id, user_id, role)
+        values ($1, $2, $3)
+        on conflict (organization_id, user_id)
+        do update set role = excluded.role
+        returning
+          organization_id,
+          (select handle from organizations where id = organization_id) as organization_handle,
+          user_id,
+          (select handle from users where id = user_id) as user_handle,
+          role,
+          created_at
+      `,
+      [organization.id, member.id, role],
+    );
+    const row = result.rows[0];
+    return row ? rowToOrganizationMember(row) : null;
+  }
+
   async listPackages(options: ListPackagesOptions = {}) {
     const limit = clampLimit(options.limit, 50);
     const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
@@ -570,7 +734,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
       where.push(`p.family = any(${addParam(params, options.families)}::package_family[])`);
     }
     if (options.owner?.trim()) {
-      where.push(`u.handle = ${addParam(params, normalizeKey(options.owner))}`);
+      where.push(`coalesce(p.publisher_handle, u.handle) = ${addParam(params, normalizePublisherHandle(options.owner))}`);
     }
     if (options.tag?.trim()) {
       where.push(`${addParam(params, normalizeTopics([options.tag])[0] ?? "")} = any(p.topics)`);
@@ -608,7 +772,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
       where.push(`p.family = any(${addParam(params, options.families)}::package_family[])`);
     }
     if (options.owner?.trim()) {
-      where.push(`u.handle = ${addParam(params, normalizeKey(options.owner))}`);
+      where.push(`coalesce(p.publisher_handle, u.handle) = ${addParam(params, normalizePublisherHandle(options.owner))}`);
     }
     if (options.tag?.trim()) {
       where.push(`${addParam(params, normalizeTopics([options.tag])[0] ?? "")} = any(p.topics)`);
@@ -677,6 +841,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
     const topics = normalizeTopics(input.tags);
     const version = createPackageVersion({ payload: input, compatibility, capabilities });
     const packageName = normalizeKey(input.name);
+    const publisher = await this.resolvePublisher(input.ownerHandle, owner);
     const storageKey = archiveStorageKey({
       packageName,
       version: version.version,
@@ -688,16 +853,14 @@ export class PostgresRegistryRepository implements RegistryRepository {
     try {
       await client.query("begin");
       await this.assertUserExists(client, owner.id);
-      const existing = await client.query<{ id: string; owner_id: string }>(
-        "select id, owner_id from packages where name = $1 for update",
+      const existing = await client.query<{ id: string }>(
+        "select id from packages where name = $1 for update",
         [packageName],
       );
       const existingPackage = existing.rows[0];
 
       if (existingPackage) {
-        if (existingPackage.owner_id !== owner.id) {
-          throw new Error("Only the package owner can publish new versions.");
-        }
+        await this.assertCanManagePackage(client, existingPackage.id, owner.id);
         await this.assertVersionDoesNotExist(client, existingPackage.id, version.version, packageName);
         await client.query("update package_versions set dist_tags = array_remove(dist_tags, 'latest') where package_id = $1", [
           existingPackage.id,
@@ -751,6 +914,8 @@ export class PostgresRegistryRepository implements RegistryRepository {
               runtime_id,
               latest_version,
               is_official,
+              publisher_type,
+              publisher_handle,
               compatibility,
               capabilities,
               verification,
@@ -774,7 +939,9 @@ export class PostgresRegistryRepository implements RegistryRepository {
               $13,
               $14,
               $15,
-              $15
+              $16,
+              $17,
+              $17
             )
             returning id
           `,
@@ -789,6 +956,8 @@ export class PostgresRegistryRepository implements RegistryRepository {
             capabilities?.runtimeId ?? null,
             version.version,
             input.channel === "official",
+            publisher.type,
+            publisher.type === "organization" ? publisher.handle : null,
             compatibility,
             capabilities,
             version.verification ?? null,
@@ -816,86 +985,127 @@ export class PostgresRegistryRepository implements RegistryRepository {
   async updatePackageSettings(name: string, user: AuthPrincipal, input: PackageSettingsInput) {
     const current = await this.getPackage(name);
     if (!current) return null;
-    const result = await this.pool.query<{ name: string }>(
-      `
-        update packages
-        set
-          display_name = $3,
-          summary = $4,
-          topics = $5,
-          channel = $6::package_channel,
-          is_official = $6 = 'official',
-          updated_at = now()
-        where name = $1 and owner_id = $2
-        returning name
-      `,
-      [
-        normalizeKey(name),
-        user.id,
-        input.displayName ?? current.displayName,
-        input.summary === undefined ? current.summary : input.summary,
-        input.tags === undefined ? (current.topics ?? []) : normalizeTopics(input.tags),
-        input.channel ?? current.channel,
-      ],
-    );
-    if (!result.rows[0]) throw new Error("Only the package owner can manage this package.");
-    return this.getPackage(result.rows[0].name);
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const packageId = await this.packageIdForUpdate(client, name);
+      if (!packageId) {
+        await client.query("rollback");
+        return null;
+      }
+      await this.assertCanManagePackage(client, packageId, user.id);
+      const result = await client.query<{ name: string }>(
+        `
+          update packages
+          set
+            display_name = $2,
+            summary = $3,
+            topics = $4,
+            channel = $5::package_channel,
+            is_official = $5 = 'official',
+            updated_at = now()
+          where id = $1
+          returning name
+        `,
+        [
+          packageId,
+          input.displayName ?? current.displayName,
+          input.summary === undefined ? current.summary : input.summary,
+          input.tags === undefined ? (current.topics ?? []) : normalizeTopics(input.tags),
+          input.channel ?? current.channel,
+        ],
+      );
+      await client.query("commit");
+      return this.getPackage(result.rows[0]?.name ?? name);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async renamePackage(name: string, user: AuthPrincipal, newName: string) {
-    const result = await this.pool.query<{ name: string }>(
-      `
-        update packages
-        set name = $3, updated_at = now()
-        where name = $1 and owner_id = $2
-        returning name
-      `,
-      [normalizeKey(name), user.id, normalizeKey(newName)],
-    );
-    if (!result.rows[0]) {
-      const existing = await this.getPackage(name);
-      if (!existing) return null;
-      throw new Error("Only the package owner can manage this package.");
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const packageId = await this.packageIdForUpdate(client, name);
+      if (!packageId) {
+        await client.query("rollback");
+        return null;
+      }
+      await this.assertCanManagePackage(client, packageId, user.id);
+      const result = await client.query<{ name: string }>(
+        "update packages set name = $2, updated_at = now() where id = $1 returning name",
+        [packageId, normalizeKey(newName)],
+      );
+      await client.query("commit");
+      return this.getPackage(result.rows[0]?.name ?? newName);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
     }
-    return this.getPackage(result.rows[0].name);
   }
 
   async transferPackage(name: string, user: AuthPrincipal, targetHandle: string) {
-    const target = await this.findUserByHandle(targetHandle);
-    if (!target) throw new Error("Target publisher does not exist.");
-    const result = await this.pool.query<{ name: string }>(
-      `
-        update packages
-        set owner_id = $3, updated_at = now()
-        where name = $1 and owner_id = $2
-        returning name
-      `,
-      [normalizeKey(name), user.id, target.id],
-    );
-    if (!result.rows[0]) {
-      const existing = await this.getPackage(name);
-      if (!existing) return null;
-      throw new Error("Only the package owner can manage this package.");
+    const target = await this.resolveTransferPublisher(targetHandle, user);
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const packageId = await this.packageIdForUpdate(client, name);
+      if (!packageId) {
+        await client.query("rollback");
+        return null;
+      }
+      await this.assertCanManagePackage(client, packageId, user.id);
+      const result = await client.query<{ name: string }>(
+        `
+          update packages
+          set owner_id = $2, publisher_type = $3, publisher_handle = $4, updated_at = now()
+          where id = $1
+          returning name
+        `,
+        [packageId, target.ownerId, target.type, target.type === "organization" ? target.handle : null],
+      );
+      await client.query("commit");
+      return this.getPackage(result.rows[0]?.name ?? name);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
     }
-    return this.getPackage(result.rows[0].name);
   }
 
   async setPackageDeleted(name: string, user: AuthPrincipal, deleted: boolean) {
-    const result = await this.pool.query<{ name: string }>(
-      `
-        update packages
-        set deleted_at = case when $3 then now() else null end, updated_at = now()
-        where name = $1 and owner_id = $2
-        returning name
-      `,
-      [normalizeKey(name), user.id, deleted],
-    );
-    if (!result.rows[0]) {
-      const existing = await this.getPackage(name);
-      if (!existing) return null;
-      throw new Error("Only the package owner can manage this package.");
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const packageId = await this.packageIdForUpdate(client, name);
+      if (!packageId) {
+        await client.query("rollback");
+        return null;
+      }
+      await this.assertCanManagePackage(client, packageId, user.id);
+      const result = await client.query<{ name: string }>(
+        `
+          update packages
+          set deleted_at = case when $2 then now() else null end, updated_at = now()
+          where id = $1
+          returning name
+        `,
+        [packageId, deleted],
+      );
+      await client.query("commit");
+      return this.getPackage(result.rows[0]?.name ?? name);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
     }
-    return this.getPackage(result.rows[0].name);
   }
 
   async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {
@@ -904,16 +1114,15 @@ export class PostgresRegistryRepository implements RegistryRepository {
     try {
       await client.query("begin");
       const pkg = await client.query<{ id: string; latest_version: string | null }>(
-        "select id, latest_version from packages where name = $1 and owner_id = $2 for update",
-        [packageName, user.id],
+        "select id, latest_version from packages where name = $1 for update",
+        [packageName],
       );
       const row = pkg.rows[0];
       if (!row) {
-        const existing = await this.getPackage(name);
         await client.query("rollback");
-        if (!existing) return null;
-        throw new Error("Only the package owner can manage this package.");
+        return null;
       }
+      await this.assertCanManagePackage(client, row.id, user.id);
 
       const yanked = await client.query<{ version: string }>(
         `
@@ -1320,6 +1529,72 @@ export class PostgresRegistryRepository implements RegistryRepository {
     );
     const row = result.rows[0];
     return row ? this.getPackage(row.name) : null;
+  }
+
+  private async organizationRole(organizationId: string, userId: string) {
+    const result = await this.pool.query<{ role: OrganizationRole }>(
+      "select role from organization_members where organization_id = $1 and user_id = $2 limit 1",
+      [organizationId, userId],
+    );
+    return result.rows[0]?.role ?? null;
+  }
+
+  private async resolvePublisher(handle: string | undefined, user: AuthPrincipal) {
+    const requested = handle?.trim() ? normalizePublisherHandle(handle) : user.handle;
+    if (normalizeKey(requested) === normalizeKey(user.handle)) {
+      return { type: "user" as const, handle: user.handle, ownerId: user.id };
+    }
+    const organization = await this.getOrganizationByHandle(requested);
+    const role = organization ? await this.organizationRole(organization.id, user.id) : null;
+    if (!organization || (role !== "owner" && role !== "maintainer")) {
+      throw new Error("You can only publish as yourself or an organization you maintain.");
+    }
+    return { type: "organization" as const, handle: organization.handle, ownerId: user.id };
+  }
+
+  private async resolveTransferPublisher(handle: string, actor: AuthPrincipal) {
+    const targetUser = await this.findUserByHandle(handle);
+    if (targetUser) return { type: "user" as const, handle: targetUser.handle, ownerId: targetUser.id };
+    return this.resolvePublisher(handle, actor);
+  }
+
+  private async packageIdForUpdate(client: PoolClient, name: string) {
+    const result = await client.query<{ id: string }>(
+      "select id from packages where name = $1 for update",
+      [normalizeKey(name)],
+    );
+    return result.rows[0]?.id ?? null;
+  }
+
+  private async assertCanManagePackage(client: PoolClient, packageId: string, userId: string) {
+    const result = await client.query<{
+      owner_id: string;
+      publisher_type: "user" | "organization";
+      organization_id: string | null;
+      role: OrganizationRole | null;
+    }>(
+      `
+        select
+          p.owner_id,
+          coalesce(p.publisher_type, 'user') as publisher_type,
+          o.id as organization_id,
+          om.role
+        from packages p
+        left join organizations o on o.handle = p.publisher_handle
+        left join organization_members om on om.organization_id = o.id and om.user_id = $2
+        where p.id = $1
+        limit 1
+      `,
+      [packageId, userId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Package does not exist.");
+    if (row.publisher_type === "organization") {
+      if (row.role === "owner" || row.role === "maintainer") return;
+      throw new Error("Only organization owners and maintainers can manage this package.");
+    }
+    if (row.owner_id === userId) return;
+    throw new Error("Only the package owner can manage this package.");
   }
 
   private async incrementStat(name: string, field: "downloads" | "installs" | "stars") {

@@ -158,6 +158,24 @@ export type AuthUser = {
   createdAt?: number | null;
 };
 
+export type Organization = {
+  id: string;
+  handle: string;
+  displayName: string;
+  description?: string | null;
+  createdAt: number;
+};
+
+export type OrganizationMember = {
+  organizationHandle: string;
+  user: {
+    id: string;
+    handle: string;
+  };
+  role: "owner" | "maintainer" | "member";
+  createdAt: number;
+};
+
 export type ProfileStats = {
   packages: number;
   plugins: number;
@@ -196,6 +214,7 @@ export type ApiTokenSummary = {
 
 export type PublishPayload = {
   name: string;
+  ownerHandle?: string;
   displayName?: string;
   family: PackageFamily;
   version: string;
@@ -213,6 +232,7 @@ export type PublishPayload = {
 
 export type PublishArchiveMetadata = {
   name?: string;
+  ownerHandle?: string;
   displayName?: string;
   family?: PackageFamily;
   version?: string;
