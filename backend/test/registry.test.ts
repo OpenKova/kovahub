@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { buildServer } from "../src/server.js";
+import { buildServerWithPackageFixtures } from "./fixtures.js";
 
 const multipartBoundary = "----kovahub-test-boundary";
 
@@ -226,8 +227,23 @@ describe("registry api", () => {
     }
   });
 
-  it("serves KovaHub-compatible package search and detail responses", async () => {
+  it("starts without sample packages", async () => {
     const app = await buildServer();
+    try {
+      const packages = await app.inject("/api/v1/packages");
+      expect(packages.statusCode).toBe(200);
+      expect(packages.json()).toMatchObject({ items: [], nextCursor: null });
+
+      const search = await app.inject("/api/v1/packages/search?q=context");
+      expect(search.statusCode).toBe(200);
+      expect(search.json()).toEqual({ results: [] });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("serves KovaHub-compatible package search and detail responses", async () => {
+    const app = await buildServerWithPackageFixtures();
     const search = await app.inject("/api/v1/packages/search?q=context");
     expect(search.statusCode).toBe(200);
     const body = search.json<{ results: Array<{ package: { name: string } }> }>();
@@ -327,7 +343,7 @@ describe("registry api", () => {
   });
 
   it("serves the Kova skill discovery and install contract", async () => {
-    const app = await buildServer();
+    const app = await buildServerWithPackageFixtures();
 
     const search = await app.inject("/api/v1/search?q=release&limit=5");
     expect(search.statusCode).toBe(200);
@@ -678,7 +694,7 @@ describe("registry api", () => {
   });
 
   it("supports authenticated highlights, comments, and reports", async () => {
-    const app = await buildServer();
+    const app = await buildServerWithPackageFixtures();
     const jwt = await signInWithGitHub(app);
     const packagePath = "/api/v1/packages/%40openkova%2Fcontext-bridge";
 

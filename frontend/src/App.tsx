@@ -328,173 +328,7 @@ function reviewLabel(item: Pick<PackageListItem, "moderationStatus">) {
   return item.moderationStatus === "pending" ? "Pending review" : "Review rejected";
 }
 
-const fallbackSkillCards: HomeCardItem[] = [
-  {
-    name: "release-notes-sherpa",
-    displayName: "Release Notes Sherpa",
-    ownerHandle: "openkova",
-    summary: "Turns changelogs and commit ranges into concise release notes.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "112",
-    downloads: "12.2k",
-    kind: "skill",
-  },
-  {
-    name: "context-bridge",
-    displayName: "Context Bridge",
-    ownerHandle: "openkova",
-    summary: "Gateway-side context extension for Kova agents.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "147",
-    downloads: "38.0k",
-    kind: "skill",
-  },
-  {
-    name: "skill-vetter",
-    displayName: "Skill Vetter",
-    ownerHandle: "openkova",
-    summary: "Check packages before installing them into a Kova workspace.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "144",
-    downloads: "43.7k",
-    kind: "skill",
-  },
-  {
-    name: "gateway-notes",
-    displayName: "Gateway Notes",
-    ownerHandle: "openkova",
-    summary: "Capture and summarize agent memory, handoffs, and workflow context.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "229",
-    downloads: "28.0k",
-    kind: "skill",
-  },
-  {
-    name: "answer-archive",
-    displayName: "Answer Archive",
-    ownerHandle: "openkova",
-    summary: "Search indexed community discussions and package documentation.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "165",
-    downloads: "18.7k",
-    kind: "skill",
-  },
-];
-
-const fallbackPluginCards: HomeCardItem[] = [
-  {
-    name: "context-bridge",
-    displayName: "Context Bridge",
-    ownerHandle: "openkova",
-    summary: "Gateway-side context extension for Kova agents.",
-    family: "code-plugin",
-    href: marketplaceRoute({ family: "code-plugin" }),
-    version: "0.1.0",
-    stars: "121",
-    downloads: "185.3k",
-    kind: "plugin",
-  },
-  {
-    name: "gateway-exporter",
-    displayName: "Gateway Exporter",
-    ownerHandle: "openkova",
-    summary: "Export Kova gateway traces and package events to observability tools.",
-    family: "code-plugin",
-    href: marketplaceRoute({ family: "code-plugin" }),
-    version: "0.5.0",
-    stars: "601",
-    downloads: "180.5k",
-    kind: "plugin",
-  },
-  {
-    name: "github-runner",
-    displayName: "GitHub Runner",
-    ownerHandle: "openkova",
-    summary: "Interact with GitHub issues, pull requests, and workflow runs from Kova.",
-    family: "code-plugin",
-    href: marketplaceRoute({ family: "code-plugin" }),
-    version: "1.0.0",
-    stars: "594",
-    downloads: "177.4k",
-    kind: "plugin",
-  },
-];
-
-const trendingFallbackCards: HomeCardItem[] = [
-  {
-    name: "self-improving-agent",
-    displayName: "Self-Improving Agent",
-    ownerHandle: "openkova",
-    summary: "Captures learnings, errors, and corrections to enable continuous improvement.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "3.6k",
-    downloads: "436.1k",
-    kind: "skill",
-  },
-  {
-    name: "skill-vetter",
-    displayName: "Skill Vetter",
-    ownerHandle: "openkova",
-    summary: "Security-first skill vetting for agent package installs.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "1.1k",
-    downloads: "239.6k",
-    kind: "skill",
-  },
-  {
-    name: "proactive-agent",
-    displayName: "Self-Improving + Proactive Agent",
-    ownerHandle: "openkova",
-    summary: "Self-reflection, learning, and self-organization for long-running agents.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "1.1k",
-    downloads: "186.4k",
-    kind: "skill",
-  },
-  {
-    name: "market-monitor",
-    displayName: "Market Monitor",
-    ownerHandle: "openkova",
-    summary: "Query prediction markets, track price movements, and monitor events.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "121",
-    downloads: "185.3k",
-    kind: "skill",
-  },
-  {
-    name: "ontology",
-    displayName: "ontology",
-    ownerHandle: "openkova",
-    summary: "Typed knowledge graph for structured agent memory and composable skills.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "601",
-    downloads: "180.5k",
-    kind: "skill",
-  },
-  {
-    name: "github",
-    displayName: "Github",
-    ownerHandle: "openkova",
-    summary: "Interact with GitHub from Kova using issues, pull requests, and workflow runs.",
-    family: "skill",
-    href: marketplaceRoute({ family: "skill" }),
-    stars: "594",
-    downloads: "177.4k",
-    kind: "skill",
-  },
-];
-
-function toHomeCard(item: PackageListItem, index: number, kind?: HomeCardKind): HomeCardItem {
+function toHomeCard(item: PackageListItem, kind?: HomeCardKind): HomeCardItem {
   const resolvedKind = kind ?? (item.family === "skill" ? "skill" : "plugin");
   return {
     name: item.name,
@@ -504,32 +338,14 @@ function toHomeCard(item: PackageListItem, index: number, kind?: HomeCardKind): 
     family: item.family,
     href: packageRoute(item.name),
     version: item.latestVersion,
-    stars: formatCompactNumber(item.stats?.stars, ["112", "147", "144", "229", "165", "3.6k"][index % 6] ?? "112"),
-    downloads: formatCompactNumber(
-      item.stats?.downloads,
-      ["12.2k", "38.0k", "43.7k", "28.0k", "18.7k", "436.1k"][index % 6] ?? "12.2k",
-    ),
+    stars: formatCompactNumber(item.stats?.stars, "0"),
+    downloads: formatCompactNumber(item.stats?.downloads, "0"),
     kind: resolvedKind,
   };
 }
 
-function homeCardKey(item: HomeCardItem) {
-  return `${item.kind}:${item.displayName.toLowerCase()}`;
-}
-
-function fillCards(cards: HomeCardItem[], fallback: HomeCardItem[], count: number): HomeCardItem[] {
-  const seen = new Set(cards.map(homeCardKey));
-  const base = [...cards, ...fallback.filter((item) => !seen.has(homeCardKey(item)))];
-  const filled: HomeCardItem[] = [];
-
-  if (base.length === 0) return filled;
-
-  for (let index = 0; index < count; index += 1) {
-    const item = base[index % base.length];
-    if (item) filled.push(item);
-  }
-
-  return filled;
+function packageActivityScore(item: PackageListItem) {
+  return (item.stats?.downloads ?? 0) + (item.stats?.installs ?? 0) + (item.stats?.stars ?? 0);
 }
 
 function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => void }) {
@@ -1207,20 +1023,20 @@ function PublishPanel({
 }) {
   const [publishMethod, setPublishMethod] = useState<"compose" | "archive">("compose");
   const [family, setFamily] = useState<PackageFamily>("code-plugin");
-  const [name, setName] = useState("@builder/demo-plugin");
-  const [displayName, setDisplayName] = useState("Demo Plugin");
-  const [version, setVersion] = useState("0.1.0");
-  const [summary, setSummary] = useState("A Kova-compatible package published from KovaHub.");
-  const [pluginApi, setPluginApi] = useState("^1.0.0");
-  const [minGatewayVersion, setMinGatewayVersion] = useState("2026.3.0");
-  const [readme, setReadme] = useState("# Demo Plugin\n\nDescribe the package here.\n");
+  const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [version, setVersion] = useState("");
+  const [summary, setSummary] = useState("");
+  const [pluginApi, setPluginApi] = useState("");
+  const [minGatewayVersion, setMinGatewayVersion] = useState("");
+  const [readme, setReadme] = useState("");
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
   const [archiveFamily, setArchiveFamily] = useState<PackageFamily | "auto">("auto");
   const [archiveName, setArchiveName] = useState("");
   const [archiveDisplayName, setArchiveDisplayName] = useState("");
   const [archiveVersion, setArchiveVersion] = useState("");
   const [archiveSummary, setArchiveSummary] = useState("");
-  const [archiveTags, setArchiveTags] = useState("kova, archive");
+  const [archiveTags, setArchiveTags] = useState("");
   const [archivePluginApi, setArchivePluginApi] = useState("");
   const [archiveMinGatewayVersion, setArchiveMinGatewayVersion] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -1245,26 +1061,29 @@ function PublishPanel({
   }
 
   async function publishComposedPackage() {
+    const readmeText = optionalText(readme);
     const payload: PublishPayload = {
       name,
-      displayName,
+      displayName: optionalText(displayName),
       family,
       version,
-      summary,
+      summary: optionalText(summary),
       compatibility:
         family === "skill"
           ? undefined
           : {
-              pluginApi,
-              minGatewayVersion,
+              pluginApi: optionalText(pluginApi),
+              minGatewayVersion: optionalText(minGatewayVersion),
             },
-      files: [
-        {
-          path: family === "skill" ? "SKILL.md" : "README.md",
-          content: readme,
-          contentType: "text/markdown",
-        },
-      ],
+      files: readmeText
+        ? [
+            {
+              path: family === "skill" ? "SKILL.md" : "README.md",
+              content: readmeText,
+              contentType: "text/markdown",
+            },
+          ]
+        : [],
     };
     return publishPackage(payload);
   }
@@ -1293,8 +1112,7 @@ function PublishPanel({
   function updateFamily(nextFamily: PackageFamily) {
     setFamily(nextFamily);
     if (nextFamily === "skill") {
-      if (!skillSlugPattern.test(name)) setName("demo-skill");
-      if (displayName === "Demo Plugin") setDisplayName("Demo Skill");
+      if (name && !skillSlugPattern.test(name)) setName("");
     }
   }
 
@@ -1338,11 +1156,19 @@ function PublishPanel({
           <div className="form-grid">
             <label>
               Package name
-              <input value={name} onChange={(event) => setName(event.target.value)} />
+              <input
+                placeholder={family === "skill" ? "my-skill" : "@scope/my-plugin"}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
             </label>
             <label>
               Display name
-              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+              <input
+                placeholder="Shown in package lists"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
             </label>
             <label>
               Family
@@ -1354,22 +1180,23 @@ function PublishPanel({
             </label>
             <label>
               Version
-              <input value={version} onChange={(event) => setVersion(event.target.value)} />
+              <input placeholder="0.1.0" value={version} onChange={(event) => setVersion(event.target.value)} />
             </label>
           </div>
           <label>
             Summary
-            <input value={summary} onChange={(event) => setSummary(event.target.value)} />
+            <input placeholder="Short package summary" value={summary} onChange={(event) => setSummary(event.target.value)} />
           </label>
           {family !== "skill" ? (
             <div className="form-grid">
               <label>
                 pluginApi
-                <input value={pluginApi} onChange={(event) => setPluginApi(event.target.value)} />
+                <input placeholder="^1.0.0" value={pluginApi} onChange={(event) => setPluginApi(event.target.value)} />
               </label>
               <label>
                 minGatewayVersion
                 <input
+                  placeholder="2026.3.0"
                   value={minGatewayVersion}
                   onChange={(event) => setMinGatewayVersion(event.target.value)}
                 />
@@ -1378,7 +1205,12 @@ function PublishPanel({
           ) : null}
           <label>
             Package content
-            <textarea value={readme} onChange={(event) => setReadme(event.target.value)} rows={7} />
+            <textarea
+              placeholder={family === "skill" ? "Paste SKILL.md content" : "Paste README.md content"}
+              value={readme}
+              onChange={(event) => setReadme(event.target.value)}
+              rows={7}
+            />
           </label>
         </>
       ) : (
@@ -1592,8 +1424,8 @@ function LandingHeader({
 }
 
 function HomePackageCard({ item, dense = false }: { item: HomeCardItem; dense?: boolean }) {
-  const owner = item.ownerHandle ? `by ${item.ownerHandle}` : "by openkova";
-  const version = item.version ? `v${item.version}` : "v1.0.0";
+  const owner = item.ownerHandle ? `by ${item.ownerHandle}` : "by publisher";
+  const version = item.version ? `v${item.version}` : "No release";
 
   return (
     <Link to={item.href} className={`home-v2-c-card${dense ? " is-dense" : ""}`}>
@@ -1634,13 +1466,26 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
 
   const skillPackages = packages.filter((item) => item.family === "skill");
   const pluginPackages = packages.filter((item) => item.family !== "skill");
-  const featuredSkills = fillCards(skillPackages.map((item, index) => toHomeCard(item, index, "skill")), fallbackSkillCards, 10);
-  const trendingCards = fillCards(packages.map((item, index) => toHomeCard(item, index)), trendingFallbackCards, 6);
-  const featuredPlugins = fillCards(
-    pluginPackages.map((item, index) => toHomeCard(item, index, "plugin")),
-    fallbackPluginCards,
-    3,
-  );
+  const featuredSkills = skillPackages.map((item) => toHomeCard(item, "skill")).slice(0, 10);
+  const trendingCards = [...packages]
+    .sort((left, right) => packageActivityScore(right) - packageActivityScore(left) || right.updatedAt - left.updatedAt)
+    .slice(0, 6)
+    .map((item) => toHomeCard(item));
+  const featuredPlugins = pluginPackages.map((item) => toHomeCard(item, "plugin")).slice(0, 3);
+  const publisherCount = new Set(packages.map((item) => item.ownerHandle).filter(Boolean)).size;
+  const totalDownloads = packages.reduce((total, item) => total + (item.stats?.downloads ?? 0), 0);
+  const totalStars = packages.reduce((total, item) => total + (item.stats?.stars ?? 0), 0);
+  const searchSuggestions = useMemo(() => {
+    const terms = new Set<string>();
+    for (const item of packages) {
+      for (const topic of topicsFor(item)) {
+        if (terms.size < 4) terms.add(topic);
+      }
+      if (terms.size < 4) terms.add(item.displayName);
+      if (terms.size >= 4) break;
+    }
+    return Array.from(terms).slice(0, 4);
+  }, [packages]);
 
   function runSearch(value: string) {
     navigate(searchRoute({ q: value }));
@@ -1696,7 +1541,7 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
               </span>
             </span>
           </h1>
-          <p className="home-v2-sub">Tools built by thousands, ready in one search.</p>
+          <p className="home-v2-sub">Search Kova-compatible plugins and skills.</p>
 
           <div className="home-v2-search-container">
             <form className="home-v2-search-bar" onSubmit={submitHeroSearch}>
@@ -1709,13 +1554,15 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
             </form>
           </div>
 
-          <div className="home-v2-suggestions">
-            {["self-improving agent", "GitHub integration", "security soul", "dashboard builder"].map((term) => (
-              <button type="button" className="home-v2-suggestion" key={term} onClick={() => runSearch(term)}>
-                {term}
-              </button>
-            ))}
-          </div>
+          {searchSuggestions.length > 0 ? (
+            <div className="home-v2-suggestions">
+              {searchSuggestions.map((term) => (
+                <button type="button" className="home-v2-suggestion" key={term} onClick={() => runSearch(term)}>
+                  {term}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         <section className="home-v2-carousel-section">
@@ -1725,31 +1572,39 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
               <Link className="home-v2-section-link" to="/skills">
                 View all <ArrowRight size={14} aria-hidden="true" />
               </Link>
-              <button
-                type="button"
-                className="home-v2-arrow"
-                aria-label="Previous featured skills"
-                onClick={() => scrollFeatured(-1)}
-              >
-                <ArrowRight className="home-v2-arrow-left" size={15} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="home-v2-arrow"
-                aria-label="Next featured skills"
-                onClick={() => scrollFeatured(1)}
-              >
-                <ArrowRight size={15} aria-hidden="true" />
-              </button>
+              {featuredSkills.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    className="home-v2-arrow"
+                    aria-label="Previous featured skills"
+                    onClick={() => scrollFeatured(-1)}
+                  >
+                    <ArrowRight className="home-v2-arrow-left" size={15} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="home-v2-arrow"
+                    aria-label="Next featured skills"
+                    onClick={() => scrollFeatured(1)}
+                  >
+                    <ArrowRight size={15} aria-hidden="true" />
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
-          <div className="home-v2-carousel-wrap" ref={carouselRef}>
-            <div className="home-v2-carousel-track">
-              {featuredSkills.map((item, index) => (
-                <HomePackageCard item={item} key={`${item.name}-${index}`} />
-              ))}
+          {featuredSkills.length > 0 ? (
+            <div className="home-v2-carousel-wrap" ref={carouselRef}>
+              <div className="home-v2-carousel-track">
+                {featuredSkills.map((item) => (
+                  <HomePackageCard item={item} key={item.name} />
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <p className="home-v2-empty">No skills published yet.</p>
+          )}
         </section>
 
         <section className="home-v2-categories">
@@ -1795,23 +1650,23 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
 
         <div className="home-v2-proof-bar">
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">52.7k</span>
+            <span className="home-v2-proof-num">{formatCompactNumber(packages.length, "0")}</span>
             <span className="home-v2-proof-label">tools</span>
           </div>
           <span className="home-v2-proof-sep" />
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">180k</span>
-            <span className="home-v2-proof-label">users</span>
+            <span className="home-v2-proof-num">{formatCompactNumber(publisherCount, "0")}</span>
+            <span className="home-v2-proof-label">publishers</span>
           </div>
           <span className="home-v2-proof-sep" />
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">12M</span>
+            <span className="home-v2-proof-num">{formatCompactNumber(totalDownloads, "0")}</span>
             <span className="home-v2-proof-label">downloads</span>
           </div>
           <span className="home-v2-proof-sep" />
           <div className="home-v2-proof-item">
-            <span className="home-v2-proof-num">4.8</span>
-            <span className="home-v2-proof-label">avg rating</span>
+            <span className="home-v2-proof-num">{formatCompactNumber(totalStars, "0")}</span>
+            <span className="home-v2-proof-label">stars</span>
           </div>
         </div>
 
@@ -1823,10 +1678,11 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
             </Link>
           </div>
           <div className="home-v2-card-grid">
-            {trendingCards.map((item, index) => (
-              <HomePackageCard item={item} dense key={`${item.name}-trend-${index}`} />
+            {trendingCards.map((item) => (
+              <HomePackageCard item={item} dense key={item.name} />
             ))}
           </div>
+          {trendingCards.length === 0 ? <p className="home-v2-empty">No trending packages yet.</p> : null}
         </section>
 
         <section className="home-v2-grid-section">
@@ -1837,10 +1693,11 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
             </Link>
           </div>
           <div className="home-v2-card-grid home-v2-card-grid-plugins">
-            {featuredPlugins.map((item, index) => (
-              <HomePackageCard item={item} dense key={`${item.name}-plugin-${index}`} />
+            {featuredPlugins.map((item) => (
+              <HomePackageCard item={item} dense key={item.name} />
             ))}
           </div>
+          {featuredPlugins.length === 0 ? <p className="home-v2-empty">No plugins published yet.</p> : null}
         </section>
 
         <footer className="home-v2-footer">
@@ -1988,7 +1845,8 @@ function PublishersPage({ theme }: { theme: ThemeSettings }) {
     >();
 
     packages.forEach((item) => {
-      const handle = item.ownerHandle ?? "openkova";
+      const handle = item.ownerHandle;
+      if (!handle) return;
       const current = byHandle.get(handle) ?? {
         handle,
         packages: 0,

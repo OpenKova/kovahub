@@ -25,15 +25,13 @@ Default local URLs:
 - Frontend: `http://localhost:5173`
 - Registry API: `http://localhost:8787`
 
-The backend defaults to the in-memory repository so the app starts with no services installed. To run the persistent mode, provide `DATABASE_URL`; migrations run automatically and package archives are written under `KOVAHUB_ARCHIVE_DIR` by default:
+The backend defaults to the in-memory repository so the app starts with no services installed and no sample packages. To run the persistent mode, provide `DATABASE_URL`; migrations run automatically and package archives are written under `KOVAHUB_ARCHIVE_DIR` by default:
 
 ```bash
 export DATABASE_URL=postgres://postgres:postgres@localhost:5432/kovahub
 export KOVAHUB_ARCHIVE_DIR=.kovahub/archives
 pnpm dev:backend
 ```
-
-Set `KOVAHUB_SEED_DATABASE=false` to skip the seed packages in a persistent database.
 
 For hosted deployments, set `KOVAHUB_ARCHIVE_STORAGE=s3` or `r2` to store archives in an S3-compatible bucket instead of the local filesystem:
 

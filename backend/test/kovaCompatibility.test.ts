@@ -1,6 +1,7 @@
 import { unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../src/server.js";
+import { buildServerWithPackageFixtures } from "./fixtures.js";
 
 describe("Kova client compatibility smoke", () => {
   it("exposes KovaHub environment aliases and route discovery", async () => {
@@ -32,7 +33,7 @@ describe("Kova client compatibility smoke", () => {
   });
 
   it("serves the Kova package lookup, version, and archive download shapes", async () => {
-    const app = await buildServer();
+    const app = await buildServerWithPackageFixtures();
 
     const search = await app.inject("/api/v1/packages/search?q=context&family=code-plugin&limit=5");
     expect(search.statusCode).toBe(200);
@@ -84,7 +85,7 @@ describe("Kova client compatibility smoke", () => {
   });
 
   it("serves the Kova skill search, detail, and install archive shapes", async () => {
-    const app = await buildServer();
+    const app = await buildServerWithPackageFixtures();
 
     const search = await app.inject("/api/v1/search?q=release&limit=5");
     expect(search.statusCode).toBe(200);

@@ -19,8 +19,6 @@ import {
   normalizeCapabilities,
   normalizeKey,
   normalizeTopics,
-  seedOwner,
-  seedPackageInputs,
   type ApiTokenRecord,
   type AuthPrincipal,
   type ListPackagesOptions,
@@ -1042,32 +1040,6 @@ export class PostgresRegistryRepository implements RegistryRepository {
     );
   }
 
-  async seedIfEmpty() {
-    const hasPackages = await this.pool.query<{ exists: boolean }>(
-      "select exists(select 1 from packages limit 1) as exists",
-    );
-    if (hasPackages.rows[0]?.exists) return;
-
-    let owner = await this.findUserByHandle(seedOwner.handle);
-    owner ??= await this.createUser({
-      handle: seedOwner.handle,
-      email: seedOwner.email,
-      passwordHash: "seed-account-disabled",
-    });
-    if (!owner.displayName) {
-      owner = await this.updateUserProfile(owner.id, {
-        displayName: "OpenKova",
-        bio: "Official Kova-compatible packages maintained for KovaHub.",
-        websiteUrl: "https://github.com/OpenKova",
-        company: "OpenKova",
-      });
-    }
-
-    for (const input of seedPackageInputs) {
-      await this.publishPackage(input, owner);
-    }
-  }
-
   private async findUser(field: "id" | "email" | "handle", value: string) {
     const result = await this.pool.query<UserRow>(
       `
@@ -1279,6 +1251,5 @@ export async function createPostgresRegistryRepository() {
   }
 
   const repo = new PostgresRegistryRepository(pool, createArchiveStoreFromEnv());
-  if (process.env.KOVAHUB_SEED_DATABASE !== "false") await repo.seedIfEmpty();
   return repo;
 }

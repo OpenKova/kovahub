@@ -375,11 +375,6 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly packageComments = new Map<string, PackageCommentRecord>();
   private readonly packageReports = new Map<string, PackageReportRecord>();
 
-  constructor() {
-    this.seedUsers();
-    this.seedPackages();
-  }
-
   async createUser(input: {
     handle: string;
     email: string;
@@ -770,107 +765,4 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private sortedPackages(sort?: ListPackagesOptions["sort"]) {
     return [...this.packages.values()].sort((left, right) => comparePackages(left, right, sort));
   }
-
-  private seedUsers() {
-    const createdAt = now();
-    const user: UserAccount = {
-      id: seedOwner.id,
-      handle: seedOwner.handle,
-      email: seedOwner.email,
-      passwordHash: "seed-account-disabled",
-      githubId: null,
-      displayName: "OpenKova",
-      imageUrl: null,
-      bio: "Official Kova-compatible packages maintained for KovaHub.",
-      websiteUrl: "https://github.com/OpenKova",
-      company: "OpenKova",
-      location: null,
-      createdAt,
-    };
-    this.users.set(user.id, user);
-    this.usersByEmail.set(user.email, user.id);
-    this.usersByHandle.set(user.handle, user.id);
-  }
-
-  private seedPackages() {
-    for (const seed of seedPackageInputs) {
-      void this.publishPackage(seed, seedOwner);
-    }
-  }
 }
-
-export const seedOwner: AuthPrincipal = {
-  id: "seed-openkova",
-  handle: "openkova",
-  email: "seed@kovahub.local",
-};
-
-export const seedPackageInputs: PublishPackageInput[] = [
-  {
-    name: "@openkova/context-bridge",
-    displayName: "Context Bridge",
-    family: "code-plugin",
-    version: "0.1.0",
-    summary: "Gateway-side context extension for Kova agents.",
-    changelog: "Initial public KovaHub seed.",
-    channel: "official",
-    tags: ["context", "gateway"],
-    compatibility: {
-      pluginApi: "^1.0.0",
-      minGatewayVersion: "2026.3.0",
-      builtWithKovaVersion: "2026.3.0",
-    },
-    capabilities: {
-      executesCode: true,
-      runtimeId: "@openkova/context-bridge",
-      providers: ["context"],
-      capabilityTags: ["provider:context", "requires:gateway"],
-    },
-    files: [
-      {
-        path: "package.json",
-        content: JSON.stringify(
-          {
-            name: "@openkova/context-bridge",
-            version: "0.1.0",
-            kova: {
-              compat: {
-                pluginApi: "^1.0.0",
-                minGatewayVersion: "2026.3.0",
-              },
-              build: {
-                kovaVersion: "2026.3.0",
-              },
-            },
-          },
-          null,
-          2,
-        ),
-        contentType: "application/json",
-      },
-      {
-        path: "README.md",
-        content: "# Context Bridge\n\nGateway-side context extension seed package.\n",
-        contentType: "text/markdown",
-      },
-    ],
-  },
-  {
-    name: "release-notes-sherpa",
-    displayName: "Release Notes Sherpa",
-    family: "skill",
-    version: "1.0.0",
-    summary: "Turns changelogs and commit ranges into concise release notes.",
-    changelog: "Initial skill seed.",
-    channel: "community",
-    tags: ["docs", "release-notes"],
-    files: [
-      {
-        path: "SKILL.md",
-        content:
-          "---\nname: release-notes-sherpa\ndescription: Draft release notes from commits and changelogs.\n---\n\nUse this skill to summarize release changes.\n",
-        contentType: "text/markdown",
-      },
-    ],
-  },
-];

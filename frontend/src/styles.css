@@ -1023,6 +1023,17 @@ button {
   min-height: 210px;
 }
 
+.home-v2-empty {
+  margin: 0;
+  padding: 24px 48px 48px;
+  color: var(--hv2-text-secondary);
+  font-size: 14px;
+}
+
+.home-v2-card-grid + .home-v2-empty {
+  padding: 18px 0 0;
+}
+
 .home-v2-footer {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
