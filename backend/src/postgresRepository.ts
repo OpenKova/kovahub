@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
-import { archiveStorageKey, type ArchiveStore, LocalArchiveStore } from "./archiveStore.js";
+import { archiveStorageKey, createArchiveStoreFromEnv, type ArchiveStore } from "./archiveStore.js";
 import {
   normalizeCompatibility,
   toPackageListItem,
@@ -932,8 +932,7 @@ export async function createPostgresRegistryRepository() {
     throw error;
   }
 
-  const archiveDir = process.env.KOVAHUB_ARCHIVE_DIR ?? ".kovahub/archives";
-  const repo = new PostgresRegistryRepository(pool, new LocalArchiveStore(archiveDir));
+  const repo = new PostgresRegistryRepository(pool, createArchiveStoreFromEnv());
   if (process.env.KOVAHUB_SEED_DATABASE !== "false") await repo.seedIfEmpty();
   return repo;
 }

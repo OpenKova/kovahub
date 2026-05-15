@@ -6,7 +6,7 @@ The MVP scaffold is intentionally small: a TypeScript backend exposes KovaHub re
 
 ## Stack
 
-- `backend/`: Fastify, Zod, JWT auth, in-memory development repository, optional Postgres persistence, local archive storage, ZIP archive generation.
+- `backend/`: Fastify, Zod, JWT auth, in-memory development repository, optional Postgres persistence, local or S3/R2-compatible archive storage, ZIP archive generation.
 - `frontend/`: React, Vite, lucide icons, ClawHub-inspired KovaHub marketplace UI.
 - `database/`: Postgres DDL for users, packages, versions, files, and API tokens.
 - Package manager: `pnpm`.
@@ -25,7 +25,7 @@ Default local URLs:
 - Frontend: `http://localhost:5173`
 - Registry API: `http://localhost:8787`
 
-The backend defaults to the in-memory repository so the app starts with no services installed. To run the persistent mode, provide `DATABASE_URL`; migrations run automatically and package archives are written under `KOVAHUB_ARCHIVE_DIR`:
+The backend defaults to the in-memory repository so the app starts with no services installed. To run the persistent mode, provide `DATABASE_URL`; migrations run automatically and package archives are written under `KOVAHUB_ARCHIVE_DIR` by default:
 
 ```bash
 export DATABASE_URL=postgres://postgres:postgres@localhost:5432/kovahub
@@ -34,6 +34,18 @@ pnpm dev:backend
 ```
 
 Set `KOVAHUB_SEED_DATABASE=false` to skip the seed packages in a persistent database.
+
+For hosted deployments, set `KOVAHUB_ARCHIVE_STORAGE=s3` or `r2` to store archives in an S3-compatible bucket instead of the local filesystem:
+
+```bash
+export KOVAHUB_ARCHIVE_STORAGE=s3
+export KOVAHUB_S3_ENDPOINT=https://example.r2.cloudflarestorage.com
+export KOVAHUB_S3_BUCKET=kovahub
+export KOVAHUB_S3_REGION=auto
+export KOVAHUB_S3_ACCESS_KEY_ID=...
+export KOVAHUB_S3_SECRET_ACCESS_KEY=...
+export KOVAHUB_S3_PREFIX=archives
+```
 
 For local Kova testing:
 
@@ -80,6 +92,7 @@ Implemented in the scaffold:
 - Multipart ZIP archive publishing with server-side `package.json`/`SKILL.md` inspection.
 - Optional Postgres persistence for users, packages, versions, files, and package stats.
 - Durable local archive storage for persistent mode.
+- S3/R2-compatible archive storage for hosted persistent mode.
 - Package list/search.
 - Package topics, owner filters, tag filters, cursor pagination, and dedicated publisher/topic pages.
 - Package detail page with compatibility, capability signals, stats, and version history.
@@ -160,10 +173,9 @@ Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MA
 
 ## Remaining Hardening
 
-1. Add S3/R2-compatible archive storage for hosted deployments.
-2. Add moderation/security scan placeholders before packages become public.
-3. Add ranking, install metrics, saved/starred packages, and richer discovery signals.
-4. Add compatibility smoke tests against the local Kova reference contracts.
+1. Add moderation/security scan placeholders before packages become public.
+2. Add ranking, install metrics, saved/starred packages, and richer discovery signals.
+3. Add compatibility smoke tests against the local Kova reference contracts.
 
 ## References
 
