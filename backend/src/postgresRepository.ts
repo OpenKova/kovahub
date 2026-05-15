@@ -12,7 +12,7 @@ import {
   type PackageRecord,
   type PackageVerificationSummary,
   type PackageVersionRecord,
-  type PublishPackageInput,
+  type PreparedPublishPackageInput,
 } from "./contracts.js";
 import {
   createPackageVersion,
@@ -398,7 +398,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
     return pkg && found ? { pkg, version: found } : null;
   }
 
-  async publishPackage(input: PublishPackageInput, owner: AuthPrincipal) {
+  async publishPackage(input: PreparedPublishPackageInput, owner: AuthPrincipal) {
     const compatibility = normalizeCompatibility(input.compatibility);
     if (input.family !== "skill") {
       if (!compatibility?.pluginApiRange) {

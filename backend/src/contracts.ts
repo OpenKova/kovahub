@@ -152,6 +152,11 @@ export const publishPackageSchema = z.object({
 
 export type PublishPackageInput = z.infer<typeof publishPackageSchema>;
 
+export type PreparedPublishPackageInput = PublishPackageInput & {
+  archiveBuffer?: Buffer;
+  archiveFiles?: PackageFile[];
+};
+
 export function normalizeCompatibility(
   input: PublishPackageInput["compatibility"],
 ): PackageCompatibility | null {

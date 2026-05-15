@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { registerAuthRoutes } from "./auth.js";
 import { createPostgresRegistryRepository } from "./postgresRepository.js";
@@ -22,6 +23,14 @@ export async function buildServer(repo?: RegistryRepository) {
     origin: true,
     credentials: true,
     methods: ["GET", "POST", "OPTIONS"],
+  });
+
+  await app.register(multipart, {
+    limits: {
+      files: 1,
+      fields: 32,
+      fileSize: Number.parseInt(process.env.KOVAHUB_MAX_ARCHIVE_BYTES ?? `${25 * 1024 * 1024}`, 10),
+    },
   });
 
   await registerAuthRoutes(app, activeRepo);

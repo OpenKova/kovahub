@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   packageFamilies,
@@ -9,6 +9,7 @@ import {
   type PackageVersionRecord,
 } from "./contracts.js";
 import { requireAuth } from "./auth.js";
+import { preparePublishInputFromArchive } from "./packageInspection.js";
 import type { RegistryRepository } from "./repository.js";
 
 const listQuerySchema = z.object({
@@ -116,6 +117,70 @@ function parseFamily(value: unknown): PackageFamily | undefined {
   return packageFamilies.find((family) => family === value);
 }
 
+function parseJsonField(value: string, fieldName: string) {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new Error(`${fieldName} must be valid JSON.`);
+  }
+}
+
+function setNestedMetadata(metadata: Record<string, unknown>, fieldName: string, value: unknown) {
+  const [head, tail] = fieldName.split(".", 2);
+  if (!head) return;
+  if (!tail) {
+    metadata[fieldName] = value;
+    return;
+  }
+  const existing = metadata[head] && typeof metadata[head] === "object" ? metadata[head] : {};
+  metadata[head] = {
+    ...(existing as Record<string, unknown>),
+    [tail]: value,
+  };
+}
+
+function parseMultipartMetadataValue(fieldName: string, value: string) {
+  if (fieldName === "tags") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("[")) return parseJsonField(trimmed, fieldName);
+    return trimmed.length > 0 ? trimmed.split(",").map((tag) => tag.trim()).filter(Boolean) : [];
+  }
+  if (fieldName === "compatibility" || fieldName === "capabilities") {
+    return parseJsonField(value, fieldName);
+  }
+  return value;
+}
+
+async function parseMultipartPublishInput(request: FastifyRequest) {
+  if (!request.isMultipart()) throw new Error("Expected multipart/form-data.");
+  let archive: Buffer | null = null;
+  const metadata: Record<string, unknown> = {};
+
+  for await (const part of request.parts()) {
+    if (part.type === "file") {
+      if (part.fieldname !== "archive") throw new Error(`Unexpected file field: ${part.fieldname}.`);
+      if (archive) throw new Error("Only one archive file can be uploaded.");
+      archive = await part.toBuffer();
+      continue;
+    }
+
+    const rawValue = part.value;
+    const value = typeof rawValue === "string" ? rawValue : String(rawValue ?? "");
+    if (part.fieldname === "metadata") {
+      const parsed = typeof rawValue === "object" && rawValue !== null ? rawValue : parseJsonField(value, "metadata");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("metadata must be a JSON object.");
+      }
+      Object.assign(metadata, parsed);
+    } else {
+      setNestedMetadata(metadata, part.fieldname, parseMultipartMetadataValue(part.fieldname, value));
+    }
+  }
+
+  if (!archive) throw new Error("Archive file is required in form field \"archive\".");
+  return preparePublishInputFromArchive({ archive, metadata });
+}
+
 export async function registerRegistryRoutes(app: FastifyInstance, repo: RegistryRepository) {
   app.get("/healthz", async () => ({
     ok: true,
@@ -153,13 +218,24 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
   app.post("/api/v1/packages", async (request, reply) => {
     const user = await requireAuth(request, reply, repo);
     if (!user) return reply;
-    const parsed = publishPackageSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.code(400);
-      return { error: parsed.error.issues[0]?.message ?? "Invalid publish payload." };
+    let input;
+    if (request.isMultipart()) {
+      try {
+        input = await parseMultipartPublishInput(request);
+      } catch (error) {
+        reply.code(400);
+        return { error: error instanceof Error ? error.message : "Invalid archive publish payload." };
+      }
+    } else {
+      const parsed = publishPackageSchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.code(400);
+        return { error: parsed.error.issues[0]?.message ?? "Invalid publish payload." };
+      }
+      input = parsed.data;
     }
     try {
-      const pkg = await repo.publishPackage(parsed.data, user);
+      const pkg = await repo.publishPackage(input, user);
       reply.code(201);
       return publicPackageDetail(pkg);
     } catch (error) {

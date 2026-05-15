@@ -11,6 +11,7 @@ import {
   type PackageListItem,
   type PackageRecord,
   type PackageVersionRecord,
+  type PreparedPublishPackageInput,
   type PublishPackageInput,
 } from "./contracts.js";
 
@@ -55,7 +56,7 @@ export type RegistryRepository = {
   searchPackages(options: { q: string; family?: PackageFamily; limit?: number }): Promise<Array<{ score: number; package: PackageListItem }>>;
   getPackage(name: string): Promise<PackageRecord | null>;
   getPackageVersion(name: string, version: string): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
-  publishPackage(input: PublishPackageInput, owner: AuthPrincipal): Promise<PackageRecord>;
+  publishPackage(input: PreparedPublishPackageInput, owner: AuthPrincipal): Promise<PackageRecord>;
   getArchive(name: string, selector?: { version?: string; tag?: string }): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   recordDownload(name: string): Promise<void>;
 };
@@ -166,7 +167,7 @@ export function defaultFilesFor(input: PublishPackageInput) {
 }
 
 export function normalizeCapabilities(
-  input: PublishPackageInput,
+  input: PreparedPublishPackageInput,
   compatibility: PackageCompatibility | null,
 ): PackageCapabilitySummary | null {
   const base = input.capabilities;
@@ -194,20 +195,22 @@ export function normalizeCapabilities(
 }
 
 export function createPackageVersion(input: {
-  payload: PublishPackageInput;
+  payload: PreparedPublishPackageInput;
   compatibility: PackageCompatibility | null;
   capabilities: PackageCapabilitySummary | null;
 }): PackageVersionRecord {
   const sourceFiles = defaultFilesFor(input.payload);
-  const archive = input.payload.archiveBase64
-    ? Buffer.from(input.payload.archiveBase64, "base64")
-    : buildArchive(sourceFiles);
+  const archive = input.payload.archiveBuffer
+    ? input.payload.archiveBuffer
+    : input.payload.archiveBase64
+      ? Buffer.from(input.payload.archiveBase64, "base64")
+      : buildArchive(sourceFiles);
   return {
     version: input.payload.version,
     createdAt: now(),
     changelog: input.payload.changelog,
     distTags: ["latest"],
-    files: buildFileMetadata(sourceFiles),
+    files: input.payload.archiveFiles ?? buildFileMetadata(sourceFiles),
     sha256hash: sha256Hex(archive),
     compatibility: input.compatibility,
     capabilities: input.capabilities,
@@ -343,7 +346,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     return pkg && found ? { pkg, version: found } : null;
   }
 
-  async publishPackage(input: PublishPackageInput, owner: AuthPrincipal) {
+  async publishPackage(input: PreparedPublishPackageInput, owner: AuthPrincipal) {
     const compatibility = normalizeCompatibility(input.compatibility);
     if (input.family !== "skill") {
       if (!compatibility?.pluginApiRange) {

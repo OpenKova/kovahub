@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
+import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../src/server.js";
+
+const multipartBoundary = "----kovahub-test-boundary";
 
 async function registerAndLogin(app: Awaited<ReturnType<typeof buildServer>>) {
   const response = await app.inject({
@@ -28,6 +32,69 @@ async function createApiToken(app: Awaited<ReturnType<typeof buildServer>>, jwt:
   expect(body.apiToken.name).toBe("local cli");
   expect(body.apiToken.lastUsedAt).toBeNull();
   return body.token;
+}
+
+function sha256Hex(bytes: Buffer) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function buildMultipartArchivePayload(params: {
+  archive: Buffer;
+  metadata?: Record<string, unknown>;
+}) {
+  const chunks: Buffer[] = [];
+  const push = (value: string | Buffer) => chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
+  if (params.metadata) {
+    push(`--${multipartBoundary}\r\n`);
+    push('content-disposition: form-data; name="metadata"\r\n');
+    push("content-type: application/json\r\n\r\n");
+    push(JSON.stringify(params.metadata));
+    push("\r\n");
+  }
+  push(`--${multipartBoundary}\r\n`);
+  push('content-disposition: form-data; name="archive"; filename="archive.zip"\r\n');
+  push("content-type: application/zip\r\n\r\n");
+  push(params.archive);
+  push("\r\n");
+  push(`--${multipartBoundary}--\r\n`);
+  return {
+    headers: {
+      "content-type": `multipart/form-data; boundary=${multipartBoundary}`,
+    },
+    payload: Buffer.concat(chunks),
+  };
+}
+
+function buildKovaPluginArchive() {
+  return Buffer.from(
+    zipSync({
+      "package.json": strToU8(
+        JSON.stringify(
+          {
+            name: "@tester/archive-plugin",
+            version: "0.2.0",
+            description: "Published from a Kova plugin archive.",
+            type: "module",
+            kova: {
+              compat: {
+                pluginApi: "^1.0.0",
+                minGatewayVersion: "2026.4.0",
+              },
+              build: {
+                kovaVersion: "2026.4.1",
+                pluginSdkVersion: "1.0.0",
+              },
+              extensions: ["./index.js"],
+            },
+          },
+          null,
+          2,
+        ),
+      ),
+      "index.js": strToU8("export default {};\n"),
+      "README.md": strToU8("# Archive Plugin\n"),
+    }),
+  );
 }
 
 describe("registry api", () => {
@@ -133,6 +200,56 @@ describe("registry api", () => {
     });
     expect(tokens.statusCode).toBe(200);
     expect(tokens.json().tokens[0].lastUsedAt).toEqual(expect.any(Number));
+    await app.close();
+  });
+
+  it("publishes a Kova plugin archive from multipart upload", async () => {
+    const app = await buildServer();
+    const jwt = await registerAndLogin(app);
+    const archive = buildKovaPluginArchive();
+    const multipart = buildMultipartArchivePayload({
+      archive,
+      metadata: {
+        displayName: "Archive Plugin",
+        tags: ["archive", "kova"],
+      },
+    });
+
+    const publish = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: {
+        authorization: `Bearer ${jwt}`,
+        ...multipart.headers,
+      },
+      payload: multipart.payload,
+    });
+    expect(publish.statusCode).toBe(201);
+    expect(publish.json().package).toMatchObject({
+      name: "@tester/archive-plugin",
+      displayName: "Archive Plugin",
+      family: "code-plugin",
+      latestVersion: "0.2.0",
+      compatibility: {
+        pluginApiRange: "^1.0.0",
+        minGatewayVersion: "2026.4.0",
+        builtWithKovaVersion: "2026.4.1",
+        pluginSdkVersion: "1.0.0",
+      },
+    });
+
+    const version = await app.inject("/api/v1/packages/%40tester%2Farchive-plugin/versions/0.2.0");
+    expect(version.statusCode).toBe(200);
+    expect(version.json().version.files.map((file: { path: string }) => file.path)).toEqual([
+      "package.json",
+      "index.js",
+      "README.md",
+    ]);
+
+    const download = await app.inject("/api/v1/packages/%40tester%2Farchive-plugin/download?tag=latest");
+    expect(download.statusCode).toBe(200);
+    expect(download.headers["x-kovahub-sha256"]).toBe(sha256Hex(archive));
+    expect(download.rawPayload.equals(archive)).toBe(true);
     await app.close();
   });
 });
