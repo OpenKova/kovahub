@@ -5,8 +5,10 @@ import type {
   PackageFamily,
   PackageListItem,
   PackageSort,
+  ProfileUpdatePayload,
   PublishArchiveMetadata,
   PublishPayload,
+  UserProfile,
 } from "./types";
 
 const apiBase = (import.meta.env.VITE_KOVAHUB_API_URL || "http://localhost:8787").replace(/\/+$/, "");
@@ -104,6 +106,17 @@ export async function publishArchivePackage(file: File, metadata: PublishArchive
 
 export async function fetchMe() {
   return request<{ user: AuthUser }>("/api/v1/auth/me");
+}
+
+export async function fetchProfile(handle: string) {
+  return request<{ profile: UserProfile }>(`/api/v1/profiles/${encodeURIComponent(handle)}`);
+}
+
+export async function updateProfile(payload: ProfileUpdatePayload) {
+  return request<{ user: AuthUser }>("/api/v1/auth/profile", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function listApiTokens() {

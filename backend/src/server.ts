@@ -25,7 +25,7 @@ export async function buildServer(repo?: RegistryRepository) {
   await app.register(cors, {
     origin: true,
     credentials: true,
-    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   });
 
   await app.register(multipart, {

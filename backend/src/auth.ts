@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import fastifyJwt from "@fastify/jwt";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { ApiTokenRecord, AuthPrincipal, RegistryRepository } from "./repository.js";
+import type { ApiTokenRecord, AuthPrincipal, RegistryRepository, UserAccount } from "./repository.js";
 
 const apiTokenSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -10,6 +10,31 @@ const apiTokenSchema = z.object({
 
 const apiTokenParamsSchema = z.object({
   id: z.string().min(1),
+});
+
+const optionalProfileText = (max: number) =>
+  z.preprocess(
+    (value) => {
+      if (typeof value !== "string") return value;
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    },
+    z.string().max(max).nullable().optional(),
+  );
+
+const profileUpdateSchema = z.object({
+  displayName: optionalProfileText(80),
+  bio: optionalProfileText(280),
+  websiteUrl: z.preprocess(
+    (value) => {
+      if (typeof value !== "string") return value;
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    },
+    z.string().url().max(200).nullable().optional(),
+  ),
+  company: optionalProfileText(80),
+  location: optionalProfileText(80),
 });
 
 const githubStartSchema = z.object({
@@ -55,11 +80,19 @@ const githubAccessTokenUrl = "https://github.com/login/oauth/access_token";
 const githubUserUrl = "https://api.github.com/user";
 const githubEmailsUrl = "https://api.github.com/user/emails";
 
-function publicUser(user: AuthPrincipal) {
+function publicUser(user: AuthPrincipal | UserAccount) {
+  const account = "passwordHash" in user ? user : null;
   return {
     id: user.id,
     handle: user.handle,
     email: user.email,
+    displayName: account?.displayName ?? null,
+    imageUrl: account?.imageUrl ?? null,
+    bio: account?.bio ?? null,
+    websiteUrl: account?.websiteUrl ?? null,
+    company: account?.company ?? null,
+    location: account?.location ?? null,
+    createdAt: account?.createdAt ?? null,
   };
 }
 
@@ -345,13 +378,39 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
   app.get("/api/v1/auth/me", async (request, reply) => {
     const user = await requireAuth(request, reply, repo);
     if (!user) return reply;
-    return { user: publicUser(user) };
+    const account = await repo.findUserById(user.id);
+    return { user: publicUser(account ?? user) };
   });
 
   app.get("/api/v1/whoami", async (request, reply) => {
     const user = await requireAuth(request, reply, repo);
     if (!user) return reply;
-    return { user: publicUser(user) };
+    const account = await repo.findUserById(user.id);
+    return { user: publicUser(account ?? user) };
+  });
+
+  app.get("/api/v1/auth/profile", async (request, reply) => {
+    const user = await requireSessionAuth(request, reply);
+    if (!user) return reply;
+    const account = await repo.findUserById(user.id);
+    if (!account) {
+      reply.code(404);
+      return { error: "Profile not found." };
+    }
+    return { user: publicUser(account) };
+  });
+
+  app.patch("/api/v1/auth/profile", async (request, reply) => {
+    const user = await requireSessionAuth(request, reply);
+    if (!user) return reply;
+    const parsed = profileUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid profile payload." };
+    }
+
+    const account = await repo.updateUserProfile(user.id, parsed.data);
+    return { user: publicUser(account) };
   });
 
   app.get("/api/v1/auth/tokens", async (request, reply) => {

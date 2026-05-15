@@ -89,6 +89,7 @@ pnpm exec playwright install chromium
 Implemented in the scaffold:
 
 - GitHub OAuth browser sign-in and bearer-token auth.
+- Public publisher profiles and signed-in profile editing.
 - API token creation and bearer-token publishing for CLI/client integrations.
 - Publish package endpoint for `skill`, `code-plugin`, and `bundle-plugin`.
 - Multipart ZIP archive publishing with server-side `package.json`/`SKILL.md` inspection.
@@ -124,6 +125,7 @@ Registry-compatible read routes:
 - `GET /api/v1/packages/:name/download?version=...`
 - `POST /api/v1/packages/:name/install`
 - `POST /api/v1/packages/:name/star`
+- `GET /api/v1/profiles/:handle`
 - `GET /api/v1/publishers/:handle/packages`
 - `GET /api/v1/tags/:tag/packages`
 - `GET /api/v1/plugins`
@@ -143,6 +145,8 @@ Auth and publish routes:
 - `GET /api/v1/auth/github/start?returnTo=/publish`
 - `GET /api/v1/auth/github/callback`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/auth/profile`
+- `PATCH /api/v1/auth/profile`
 - `GET /api/v1/whoami`
 - `GET /api/v1/auth/tokens`
 - `POST /api/v1/auth/tokens`

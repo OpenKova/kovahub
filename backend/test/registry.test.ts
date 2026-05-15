@@ -305,6 +305,18 @@ describe("registry api", () => {
       ]),
     );
 
+    const publisherProfile = await app.inject("/api/v1/profiles/openkova");
+    expect(publisherProfile.statusCode).toBe(200);
+    expect(publisherProfile.json().profile).toMatchObject({
+      handle: "openkova",
+      displayName: "OpenKova",
+      stats: expect.objectContaining({
+        packages: expect.any(Number),
+        plugins: expect.any(Number),
+        skills: expect.any(Number),
+      }),
+    });
+
     const versions = await app.inject("/api/v1/packages/%40openkova%2Fcontext-bridge/versions");
     expect(versions.statusCode).toBe(200);
     expect(versions.json().items[0]).toMatchObject({
@@ -564,6 +576,65 @@ describe("registry api", () => {
     });
     expect(whoami.statusCode).toBe(200);
     expect(whoami.json().user.handle).toBe("tester");
+    await app.close();
+  });
+
+  it("lets GitHub users maintain public profile metadata", async () => {
+    const app = await buildServer();
+    const jwt = await signInWithGitHub(app);
+
+    const update = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/auth/profile",
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: {
+        displayName: "Tester Labs",
+        bio: "Publishing Kova-compatible skills and plugins.",
+        websiteUrl: "https://tester.example",
+        company: "Tester Labs",
+        location: "Remote",
+      },
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.json().user).toMatchObject({
+      handle: "tester",
+      displayName: "Tester Labs",
+      bio: "Publishing Kova-compatible skills and plugins.",
+      websiteUrl: "https://tester.example",
+      company: "Tester Labs",
+      location: "Remote",
+    });
+
+    const publish = await app.inject({
+      method: "POST",
+      url: "/api/v1/packages",
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: {
+        name: "@tester/profile-plugin",
+        displayName: "Profile Plugin",
+        family: "code-plugin",
+        version: "0.1.0",
+        compatibility: {
+          pluginApi: "^1.0.0",
+          minGatewayVersion: "2026.3.0",
+        },
+      },
+    });
+    expect(publish.statusCode).toBe(201);
+
+    const profile = await app.inject("/api/v1/profiles/tester");
+    expect(profile.statusCode).toBe(200);
+    expect(profile.json().profile).toMatchObject({
+      handle: "tester",
+      displayName: "Tester Labs",
+      bio: "Publishing Kova-compatible skills and plugins.",
+      websiteUrl: "https://tester.example",
+      stats: {
+        packages: 1,
+        plugins: 1,
+        skills: 0,
+      },
+    });
     await app.close();
   });
 

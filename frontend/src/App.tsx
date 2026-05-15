@@ -7,6 +7,7 @@ import {
   Code2,
   Copy,
   Download,
+  ExternalLink,
   FileArchive,
   Github,
   History,
@@ -35,6 +36,7 @@ import {
   fetchMe,
   fetchPackageDetail,
   fetchPackages,
+  fetchProfile,
   getApiBase,
   getStoredToken,
   githubLoginUrl,
@@ -44,6 +46,7 @@ import {
   revokeApiToken,
   listApiTokens,
   storeToken,
+  updateProfile,
 } from "./api";
 import { kovaRoboLogo } from "./brandAssets";
 import type {
@@ -53,8 +56,10 @@ import type {
   PackageFamily,
   PackageListItem,
   PackageSort,
+  ProfileUpdatePayload,
   PublishArchiveMetadata,
   PublishPayload,
+  UserProfile,
 } from "./types";
 
 const familyLabels: Record<PackageFamily, string> = {
@@ -97,6 +102,13 @@ type HomeCardItem = {
   stars: string;
   downloads: string;
   kind: HomeCardKind;
+};
+type ProfileFormState = {
+  displayName: string;
+  bio: string;
+  websiteUrl: string;
+  company: string;
+  location: string;
 };
 
 function readStoredThemeMode(): ThemeMode {
@@ -230,6 +242,24 @@ function marketplaceRoute(
 
 function publisherRoute(handle: string) {
   return `/publishers/${encodeURIComponent(handle)}`;
+}
+
+function displayUserName(user: Pick<AuthUser, "handle" | "displayName">) {
+  return user.displayName?.trim() || `@${user.handle}`;
+}
+
+function profileInitial(value: string) {
+  return (value.trim()[0] ?? "K").toUpperCase();
+}
+
+function profileFormFromUser(user: AuthUser): ProfileFormState {
+  return {
+    displayName: user.displayName ?? "",
+    bio: user.bio ?? "",
+    websiteUrl: user.websiteUrl ?? "",
+    company: user.company ?? "",
+    location: user.location ?? "",
+  };
 }
 
 function tagRoute(tag: string) {
@@ -487,7 +517,10 @@ function Header({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => v
         {user ? (
           <div className="user-chip">
             <UserRound size={15} aria-hidden="true" />
-            <span>@{user.handle}</span>
+            <span>{displayUserName(user)}</span>
+            <Link className="link-button" to="/profile">
+              Profile
+            </Link>
             <button className="link-button" type="button" onClick={onSignOut}>
               Sign out
             </button>
@@ -1230,7 +1263,8 @@ function LandingHeader({
           {user ? (
             <div className="home-user-chip">
               <UserRound size={15} aria-hidden="true" />
-              <span>@{user.handle}</span>
+              <span>{displayUserName(user)}</span>
+              <Link to="/profile">Profile</Link>
               <button type="button" onClick={onSignOut}>
                 Sign out
               </button>
@@ -1540,9 +1574,21 @@ function HomeLanding({ theme }: { theme: ThemeSettings }) {
   );
 }
 
-function LandingPageShell({ theme, children }: { theme: ThemeSettings; children: ReactNode }) {
+function LandingPageShell({
+  theme,
+  children,
+  userOverride,
+  onUserChange,
+}: {
+  theme: ThemeSettings;
+  children: ReactNode;
+  userOverride?: AuthUser | null;
+  onUserChange?: (user: AuthUser | null) => void;
+}) {
   const navigate = useNavigate();
-  const { user, setUser } = useLandingUser();
+  const { user: loadedUser, setUser: setLoadedUser } = useLandingUser();
+  const user = userOverride === undefined ? loadedUser : userOverride;
+  const setUser = onUserChange ?? setLoadedUser;
 
   return (
     <div className="home-page" data-theme={theme.resolved}>
@@ -1712,24 +1758,266 @@ function PublishersPage({ theme }: { theme: ThemeSettings }) {
   );
 }
 
+function ProfileAvatar({
+  profile,
+  user,
+  handle,
+}: {
+  profile?: UserProfile | null;
+  user?: AuthUser | null;
+  handle: string;
+}) {
+  const imageUrl = profile?.imageUrl ?? user?.imageUrl ?? null;
+  const label = profile?.displayName ?? user?.displayName ?? handle;
+
+  return (
+    <span className="profile-avatar" aria-hidden="true">
+      {imageUrl ? <img src={imageUrl} alt="" /> : profileInitial(label || handle)}
+    </span>
+  );
+}
+
+function ProfileMeta({ profile }: { profile: UserProfile }) {
+  const entries = [
+    profile.company ? ["Company", profile.company] : null,
+    profile.location ? ["Location", profile.location] : null,
+  ].filter((item): item is [string, string] => Boolean(item));
+
+  return (
+    <div className="profile-meta">
+      {entries.map(([label, value]) => (
+        <span key={label}>{value}</span>
+      ))}
+      {profile.websiteUrl ? (
+        <a href={profile.websiteUrl} target="_blank" rel="noreferrer">
+          Website <ExternalLink size={13} aria-hidden="true" />
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function ProfileStatsRow({ profile }: { profile: UserProfile }) {
+  const stats: Array<[string, number]> = [
+    ["Packages", profile.stats.packages],
+    ["Plugins", profile.stats.plugins],
+    ["Skills", profile.stats.skills],
+    ["Downloads", profile.stats.downloads],
+    ["Stars", profile.stats.stars],
+  ];
+
+  return (
+    <div className="profile-stats" aria-label="Publisher stats">
+      {stats.map(([label, value]) => (
+        <span key={label}>
+          <strong>{formatCompactNumber(value, "0")}</strong>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function nullableProfileText(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function ProfilePage({ theme }: { theme: ThemeSettings }) {
+  const { user, setUser } = useLandingUser();
+  const [form, setForm] = useState<ProfileFormState | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const hasSession = Boolean(getStoredToken());
+
+  useEffect(() => {
+    if (user) setForm(profileFormFromUser(user));
+  }, [user]);
+
+  function updateField(field: keyof ProfileFormState, value: string) {
+    setForm((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  async function saveProfile(event: FormEvent) {
+    event.preventDefault();
+    if (!form) return;
+    setSaving(true);
+    setStatus(null);
+    setError(null);
+    try {
+      const result = await updateProfile({
+        displayName: nullableProfileText(form.displayName),
+        bio: nullableProfileText(form.bio),
+        websiteUrl: nullableProfileText(form.websiteUrl),
+        company: nullableProfileText(form.company),
+        location: nullableProfileText(form.location),
+      });
+      setUser(result.user);
+      setForm(profileFormFromUser(result.user));
+      setStatus("Profile saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save profile.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!hasSession && !user) {
+    return (
+      <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+        <section className="auth-card profile-auth-card">
+          <div className="section-title">
+            <UserRound size={17} aria-hidden="true" />
+            <h2>Sign in required</h2>
+          </div>
+          <p className="muted">GitHub sign-in is required to edit your KovaHub profile.</p>
+          <a className="content-primary-action" href={githubLoginUrl("/profile")}>
+            <Github size={16} aria-hidden="true" />
+            Sign in with GitHub
+          </a>
+        </section>
+      </LandingPageShell>
+    );
+  }
+
+  if (!user || !form) {
+    return (
+      <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+        <section className="content-section">
+          <p className="content-muted">Loading profile...</p>
+        </section>
+      </LandingPageShell>
+    );
+  }
+
+  return (
+    <LandingPageShell theme={theme} userOverride={user} onUserChange={setUser}>
+      <section className="content-hero">
+        <p>PROFILE</p>
+        <div className="profile-hero-row">
+          <ProfileAvatar user={user} handle={user.handle} />
+          <div>
+            <h1>{displayUserName(user)}</h1>
+            <span>@{user.handle}</span>
+          </div>
+        </div>
+        <span>Your public KovaHub identity for published plugins, skills, and registry activity.</span>
+        <div className="content-actions">
+          <Link className="content-primary-action" to={publisherRoute(user.handle)}>
+            Public profile <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+          <Link className="content-secondary-action" to="/publish">
+            Publish package
+          </Link>
+        </div>
+      </section>
+
+      <section className="profile-grid">
+        <form className="profile-card profile-form" onSubmit={saveProfile}>
+          <div className="section-title">
+            <UserRound size={17} aria-hidden="true" />
+            <h2>Profile details</h2>
+          </div>
+          <label>
+            Display name
+            <input
+              value={form.displayName}
+              onChange={(event) => updateField("displayName", event.target.value)}
+              placeholder="Kova publisher"
+            />
+          </label>
+          <label>
+            Bio
+            <textarea
+              value={form.bio}
+              onChange={(event) => updateField("bio", event.target.value)}
+              maxLength={280}
+              placeholder="What are you building for Kova?"
+            />
+          </label>
+          <div className="profile-form-pair">
+            <label>
+              Website
+              <input
+                value={form.websiteUrl}
+                onChange={(event) => updateField("websiteUrl", event.target.value)}
+                placeholder="https://example.com"
+              />
+            </label>
+            <label>
+              Company
+              <input
+                value={form.company}
+                onChange={(event) => updateField("company", event.target.value)}
+                placeholder="Team or organization"
+              />
+            </label>
+          </div>
+          <label>
+            Location
+            <input
+              value={form.location}
+              onChange={(event) => updateField("location", event.target.value)}
+              placeholder="City, country"
+            />
+          </label>
+          {error ? <p className="form-error">{error}</p> : null}
+          {status ? <p className="form-success">{status}</p> : null}
+          <button className="primary-action" type="submit" disabled={saving}>
+            <UserRound size={16} aria-hidden="true" />
+            {saving ? "Saving..." : "Save profile"}
+          </button>
+        </form>
+
+        <aside className="profile-card profile-preview">
+          <div className="section-title">
+            <Users size={17} aria-hidden="true" />
+            <h2>Public preview</h2>
+          </div>
+          <div className="profile-preview-head">
+            <ProfileAvatar user={user} handle={user.handle} />
+            <div>
+              <strong>{form.displayName.trim() || `@${user.handle}`}</strong>
+              <span>@{user.handle}</span>
+            </div>
+          </div>
+          <p>{form.bio.trim() || "No bio added yet."}</p>
+          <div className="profile-meta">
+            {form.company.trim() ? <span>{form.company.trim()}</span> : null}
+            {form.location.trim() ? <span>{form.location.trim()}</span> : null}
+            {form.websiteUrl.trim() ? <span>{form.websiteUrl.trim()}</span> : null}
+          </div>
+        </aside>
+      </section>
+    </LandingPageShell>
+  );
+}
+
 function PublisherDetailPage({ theme }: { theme: ThemeSettings }) {
   const { handle = "" } = useParams();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [packages, setPackages] = useState<PackageListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const plugins = packages.filter((item) => item.family !== "skill").length;
   const skills = packages.filter((item) => item.family === "skill").length;
+  const displayName = profile?.displayName || `@${handle}`;
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
-    fetchPackages({ owner: handle, limit: 100 })
-      .then((page) => {
-        if (active) setPackages(page.items);
-      })
-      .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load publisher packages.");
+    setProfile(null);
+    Promise.allSettled([fetchPackages({ owner: handle, limit: 100 }), fetchProfile(handle)])
+      .then(([packagesResult, profileResult]) => {
+        if (!active) return;
+        if (packagesResult.status === "fulfilled") setPackages(packagesResult.value.items);
+        else {
+          setPackages([]);
+          setError(packagesResult.reason instanceof Error ? packagesResult.reason.message : "Failed to load publisher packages.");
+        }
+        if (profileResult.status === "fulfilled") setProfile(profileResult.value.profile);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -1743,10 +2031,16 @@ function PublisherDetailPage({ theme }: { theme: ThemeSettings }) {
     <LandingPageShell theme={theme}>
       <section className="content-hero">
         <p>PUBLISHER</p>
-        <h1>@{handle}</h1>
-        <span>
-          {packages.length} Kova-compatible packages · {plugins} plugins · {skills} skills
-        </span>
+        <div className="profile-hero-row">
+          <ProfileAvatar profile={profile} handle={handle} />
+          <div>
+            <h1>{displayName}</h1>
+            <span>@{handle}</span>
+          </div>
+        </div>
+        <span>{profile?.bio ?? `${packages.length} Kova-compatible packages · ${plugins} plugins · ${skills} skills`}</span>
+        {profile ? <ProfileMeta profile={profile} /> : null}
+        {profile ? <ProfileStatsRow profile={profile} /> : null}
         <div className="content-actions">
           <Link className="content-primary-action" to={marketplaceRoute({ owner: handle })}>
             Search publisher <ArrowRight size={16} aria-hidden="true" />
@@ -2107,6 +2401,7 @@ export default function App() {
       <Route path="/" element={<HomeLanding theme={theme} />} />
       <Route path="/skills" element={<DirectoryPage kind="skills" theme={theme} />} />
       <Route path="/plugins" element={<DirectoryPage kind="plugins" theme={theme} />} />
+      <Route path="/profile" element={<ProfilePage theme={theme} />} />
       <Route path="/publishers/:handle" element={<PublisherDetailPage theme={theme} />} />
       <Route path="/publishers" element={<PublishersPage theme={theme} />} />
       <Route path="/tags/:tag" element={<TagPage theme={theme} />} />

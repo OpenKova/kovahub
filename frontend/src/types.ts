@@ -103,6 +103,42 @@ export type AuthUser = {
   id: string;
   handle: string;
   email: string;
+  displayName?: string | null;
+  imageUrl?: string | null;
+  bio?: string | null;
+  websiteUrl?: string | null;
+  company?: string | null;
+  location?: string | null;
+  createdAt?: number | null;
+};
+
+export type ProfileStats = {
+  packages: number;
+  plugins: number;
+  skills: number;
+  downloads: number;
+  installs: number;
+  stars: number;
+};
+
+export type UserProfile = {
+  handle: string;
+  displayName: string;
+  imageUrl?: string | null;
+  bio?: string | null;
+  websiteUrl?: string | null;
+  company?: string | null;
+  location?: string | null;
+  createdAt: number;
+  stats: ProfileStats;
+};
+
+export type ProfileUpdatePayload = {
+  displayName?: string | null;
+  bio?: string | null;
+  websiteUrl?: string | null;
+  company?: string | null;
+  location?: string | null;
 };
 
 export type ApiTokenSummary = {

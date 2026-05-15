@@ -27,7 +27,20 @@ export type UserAccount = AuthPrincipal & {
   githubId?: string | null;
   displayName?: string | null;
   imageUrl?: string | null;
+  bio?: string | null;
+  websiteUrl?: string | null;
+  company?: string | null;
+  location?: string | null;
   createdAt: number;
+};
+
+export type UserProfileUpdate = {
+  displayName?: string | null;
+  imageUrl?: string | null;
+  bio?: string | null;
+  websiteUrl?: string | null;
+  company?: string | null;
+  location?: string | null;
 };
 
 export type ApiTokenRecord = {
@@ -72,6 +85,7 @@ export type RegistryRepository = {
   findUserByEmail(email: string): Promise<UserAccount | null>;
   findUserByHandle(handle: string): Promise<UserAccount | null>;
   findUserById(id: string): Promise<UserAccount | null>;
+  updateUserProfile(userId: string, input: UserProfileUpdate): Promise<UserAccount>;
   createApiToken(input: { userId: string; name: string; tokenHash: string }): Promise<ApiTokenRecord>;
   listApiTokens(userId: string): Promise<ApiTokenRecord[]>;
   revokeApiToken(input: { userId: string; tokenId: string }): Promise<boolean>;
@@ -332,6 +346,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly packages = new Map<string, PackageRecord>();
 
   constructor() {
+    this.seedUsers();
     this.seedPackages();
   }
 
@@ -352,6 +367,10 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       githubId: null,
       displayName: null,
       imageUrl: null,
+      bio: null,
+      websiteUrl: null,
+      company: null,
+      location: null,
       createdAt: now(),
     };
     this.users.set(user.id, user);
@@ -398,6 +417,10 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       githubId: input.githubId,
       displayName: input.displayName ?? null,
       imageUrl: input.imageUrl ?? null,
+      bio: null,
+      websiteUrl: null,
+      company: null,
+      location: null,
       createdAt: now(),
     };
     this.users.set(user.id, user);
@@ -419,6 +442,18 @@ export class InMemoryRegistryRepository implements RegistryRepository {
 
   async findUserById(id: string) {
     return this.users.get(id) ?? null;
+  }
+
+  async updateUserProfile(userId: string, input: UserProfileUpdate) {
+    const user = this.users.get(userId);
+    if (!user) throw new Error("User does not exist.");
+    if ("displayName" in input) user.displayName = input.displayName ?? null;
+    if ("imageUrl" in input) user.imageUrl = input.imageUrl ?? null;
+    if ("bio" in input) user.bio = input.bio ?? null;
+    if ("websiteUrl" in input) user.websiteUrl = input.websiteUrl ?? null;
+    if ("company" in input) user.company = input.company ?? null;
+    if ("location" in input) user.location = input.location ?? null;
+    return user;
   }
 
   async createApiToken(input: { userId: string; name: string; tokenHash: string }) {
@@ -603,6 +638,27 @@ export class InMemoryRegistryRepository implements RegistryRepository {
 
   private sortedPackages(sort?: ListPackagesOptions["sort"]) {
     return [...this.packages.values()].sort((left, right) => comparePackages(left, right, sort));
+  }
+
+  private seedUsers() {
+    const createdAt = now();
+    const user: UserAccount = {
+      id: seedOwner.id,
+      handle: seedOwner.handle,
+      email: seedOwner.email,
+      passwordHash: "seed-account-disabled",
+      githubId: null,
+      displayName: "OpenKova",
+      imageUrl: null,
+      bio: "Official Kova-compatible packages maintained for KovaHub.",
+      websiteUrl: "https://github.com/OpenKova",
+      company: "OpenKova",
+      location: null,
+      createdAt,
+    };
+    this.users.set(user.id, user);
+    this.usersByEmail.set(user.email, user.id);
+    this.usersByHandle.set(user.handle, user.id);
   }
 
   private seedPackages() {

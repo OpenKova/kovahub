@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   packageFamilies,
   publishPackageSchema,
+  type PackageListItem,
   toPackageListItem,
   type PackageFamily,
   type PackageRecord,
@@ -10,7 +11,7 @@ import {
 } from "./contracts.js";
 import { requireAuth } from "./auth.js";
 import { preparePublishInputFromArchive } from "./packageInspection.js";
-import type { RegistryRepository } from "./repository.js";
+import type { RegistryRepository, UserAccount } from "./repository.js";
 
 const listQuerySchema = z.object({
   q: z.string().optional(),
@@ -101,6 +102,44 @@ function publicVersionDetail(pkg: PackageRecord, version: PackageVersionRecord) 
       ...publicVersionSummary(version),
     },
   };
+}
+
+function publicProfile(user: UserAccount, packages: PackageListItem[]) {
+  const stats = packages.reduce(
+    (accumulator, item) => {
+      accumulator.packages += 1;
+      if (item.family === "skill") accumulator.skills += 1;
+      else accumulator.plugins += 1;
+      accumulator.downloads += item.stats?.downloads ?? 0;
+      accumulator.installs += item.stats?.installs ?? 0;
+      accumulator.stars += item.stats?.stars ?? 0;
+      return accumulator;
+    },
+    { packages: 0, plugins: 0, skills: 0, downloads: 0, installs: 0, stars: 0 },
+  );
+
+  return {
+    handle: user.handle,
+    displayName: user.displayName ?? user.handle,
+    imageUrl: user.imageUrl ?? null,
+    bio: user.bio ?? null,
+    websiteUrl: user.websiteUrl ?? null,
+    company: user.company ?? null,
+    location: user.location ?? null,
+    createdAt: user.createdAt,
+    stats,
+  };
+}
+
+async function listAllPublisherPackages(repo: RegistryRepository, handle: string) {
+  const items: PackageListItem[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await repo.listPackages({ owner: handle, limit: 100, cursor: cursor ?? undefined });
+    items.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return items;
 }
 
 async function recordPackageSignal(
@@ -347,6 +386,21 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
 
   app.get("/api/v1/packages/trending", async (request, reply) => {
     return listPackageCatalog(request, reply, repo, { sort: "trending" });
+  });
+
+  app.get("/api/v1/profiles/:handle", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid profile handle." };
+    }
+    const user = await repo.findUserByHandle(params.data.handle);
+    if (!user) {
+      reply.code(404);
+      return { profile: null };
+    }
+    const packages = await listAllPublisherPackages(repo, user.handle);
+    return { profile: publicProfile(user, packages) };
   });
 
   app.get("/api/v1/publishers/:handle/packages", async (request, reply) => {

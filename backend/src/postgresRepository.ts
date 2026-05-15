@@ -72,6 +72,10 @@ type UserRow = QueryResultRow & {
   github_id: string | null;
   display_name: string | null;
   image_url: string | null;
+  bio: string | null;
+  website_url: string | null;
+  company: string | null;
+  location: string | null;
   created_at: Date;
 };
 
@@ -115,6 +119,8 @@ const packageSelect = `
     ${packageColumns}
     ${packageFrom}
 `;
+
+const userColumns = "id, handle, email, password_hash, github_id, display_name, image_url, bio, website_url, company, location, created_at";
 
 function timeMs(value: Date) {
   return value.getTime();
@@ -176,6 +182,10 @@ function rowToUser(row: UserRow): UserAccount {
     githubId: row.github_id,
     displayName: row.display_name,
     imageUrl: row.image_url,
+    bio: row.bio,
+    websiteUrl: row.website_url,
+    company: row.company,
+    location: row.location,
     createdAt: timeMs(row.created_at),
   };
 }
@@ -284,7 +294,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
       `
         insert into users (handle, email, password_hash)
         values ($1, $2, $3)
-        returning id, handle, email, password_hash, github_id, display_name, image_url, created_at
+        returning ${userColumns}
       `,
       [normalizeKey(input.handle), normalizeKey(input.email), input.passwordHash],
     );
@@ -305,7 +315,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
       await client.query("begin");
       const existingGithub = await client.query<UserRow>(
         `
-          select id, handle, email, password_hash, github_id, display_name, image_url, created_at
+          select ${userColumns}
           from users
           where github_id = $1
           limit 1
@@ -321,7 +331,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
       const email = normalizeKey(input.email);
       const existingEmail = await client.query<UserRow>(
         `
-          select id, handle, email, password_hash, github_id, display_name, image_url, created_at
+          select ${userColumns}
           from users
           where email = $1
           limit 1
@@ -343,7 +353,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
               image_url = coalesce($4, image_url),
               updated_at = now()
             where id = $1
-            returning id, handle, email, password_hash, github_id, display_name, image_url, created_at
+            returning ${userColumns}
           `,
           [emailRow.id, input.githubId, input.displayName ?? null, input.imageUrl ?? null],
         );
@@ -358,7 +368,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
         `
           insert into users (handle, email, password_hash, github_id, display_name, image_url, auth_provider)
           values ($1, $2, $3, $4, $5, $6, 'github')
-          returning id, handle, email, password_hash, github_id, display_name, image_url, created_at
+          returning ${userColumns}
         `,
         [
           handle,
@@ -391,6 +401,45 @@ export class PostgresRegistryRepository implements RegistryRepository {
 
   async findUserById(id: string) {
     return this.findUser("id", id);
+  }
+
+  async updateUserProfile(userId: string, input: {
+    displayName?: string | null;
+    imageUrl?: string | null;
+    bio?: string | null;
+    websiteUrl?: string | null;
+    company?: string | null;
+    location?: string | null;
+  }) {
+    const current = await this.findUserById(userId);
+    if (!current) throw new Error("User does not exist.");
+    const result = await this.pool.query<UserRow>(
+      `
+        update users
+        set
+          display_name = $2,
+          image_url = $3,
+          bio = $4,
+          website_url = $5,
+          company = $6,
+          location = $7,
+          updated_at = now()
+        where id = $1
+        returning ${userColumns}
+      `,
+      [
+        userId,
+        "displayName" in input ? input.displayName : current.displayName,
+        "imageUrl" in input ? input.imageUrl : current.imageUrl,
+        "bio" in input ? input.bio : current.bio,
+        "websiteUrl" in input ? input.websiteUrl : current.websiteUrl,
+        "company" in input ? input.company : current.company,
+        "location" in input ? input.location : current.location,
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("User does not exist.");
+    return rowToUser(row);
   }
 
   async createApiToken(input: { userId: string; name: string; tokenHash: string }) {
@@ -750,6 +799,14 @@ export class PostgresRegistryRepository implements RegistryRepository {
       email: seedOwner.email,
       passwordHash: "seed-account-disabled",
     });
+    if (!owner.displayName) {
+      owner = await this.updateUserProfile(owner.id, {
+        displayName: "OpenKova",
+        bio: "Official Kova-compatible packages maintained for KovaHub.",
+        websiteUrl: "https://github.com/OpenKova",
+        company: "OpenKova",
+      });
+    }
 
     for (const input of seedPackageInputs) {
       await this.publishPackage(input, owner);
@@ -759,7 +816,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
   private async findUser(field: "id" | "email" | "handle", value: string) {
     const result = await this.pool.query<UserRow>(
       `
-        select id, handle, email, password_hash, github_id, display_name, image_url, created_at
+        select ${userColumns}
         from users
         where ${field} = $1
         limit 1
