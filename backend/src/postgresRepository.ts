@@ -19,6 +19,7 @@ import {
 } from "./contracts.js";
 import {
   createPackageVersion,
+  autoHideReportThreshold,
   mergeVerification,
   normalizeCapabilities,
   normalizeKey,
@@ -92,6 +93,8 @@ type UserRow = QueryResultRow & {
   website_url: string | null;
   company: string | null;
   location: string | null;
+  banned_at: Date | null;
+  ban_reason: string | null;
   created_at: Date;
 };
 
@@ -193,7 +196,7 @@ const packageSelect = `
     ${packageFrom}
 `;
 
-const userColumns = "id, handle, email, password_hash, github_id, display_name, image_url, bio, website_url, company, location, created_at";
+const userColumns = "id, handle, email, password_hash, github_id, display_name, image_url, bio, website_url, company, location, banned_at, ban_reason, created_at";
 
 function timeMs(value: Date) {
   return value.getTime();
@@ -270,6 +273,8 @@ function rowToUser(row: UserRow): UserAccount {
     websiteUrl: row.website_url,
     company: row.company,
     location: row.location,
+    bannedAt: row.banned_at ? timeMs(row.banned_at) : null,
+    banReason: row.ban_reason,
     createdAt: timeMs(row.created_at),
   };
 }
@@ -667,6 +672,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
         set last_used_at = now()
         from users u
         where t.user_id = u.id and t.token_hash = $1
+          and u.banned_at is null
         returning u.id, u.handle, u.email
       `,
       [tokenHash],
@@ -909,6 +915,26 @@ export class PostgresRegistryRepository implements RegistryRepository {
     );
     const row = result.rows[0];
     return row ? rowToOrganizationMember(row) : null;
+  }
+
+  async setUserBan(handle: string, reviewer: AuthPrincipal, input: { banned: boolean; reason?: string | null }) {
+    const user = await this.findUserByHandle(handle);
+    if (!user) return null;
+    if (user.id === reviewer.id && input.banned) throw new Error("Reviewers cannot ban themselves.");
+    const result = await this.pool.query<UserRow>(
+      `
+        update users
+        set
+          banned_at = case when $2 then now() else null end,
+          ban_reason = case when $2 then $3 else null end,
+          updated_at = now()
+        where handle = $1
+        returning ${userColumns}
+      `,
+      [normalizePublisherHandle(handle), input.banned, input.reason ?? null],
+    );
+    const row = result.rows[0];
+    return row ? rowToUser(row) : null;
   }
 
   async listPackages(options: ListPackagesOptions = {}) {
@@ -1296,6 +1322,14 @@ export class PostgresRegistryRepository implements RegistryRepository {
     }
   }
 
+  async hardDeletePackage(name: string, _reviewer: AuthPrincipal) {
+    const result = await this.pool.query<{ id: string }>(
+      "delete from packages where name = $1 returning id",
+      [normalizeKey(name)],
+    );
+    return result.rowCount === 1;
+  }
+
   async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {
     const packageName = normalizeKey(name);
     const client = await this.pool.connect();
@@ -1580,6 +1614,17 @@ export class PostgresRegistryRepository implements RegistryRepository {
         return null;
       }
 
+      const openReports = await client.query<{ count: string }>(
+        `
+          select count(*)::text as count
+          from package_reports pr
+          join packages p on p.id = pr.package_id
+          where p.name = $1 and pr.status = 'open'
+        `,
+        [normalizeKey(name)],
+      );
+      const shouldHide = Number.parseInt(openReports.rows[0]?.count ?? "0", 10) >= autoHideReportThreshold();
+
       await client.query(
         `
           update packages
@@ -1587,12 +1632,21 @@ export class PostgresRegistryRepository implements RegistryRepository {
             || jsonb_build_object(
               'tier', coalesce(verification->>'tier', 'structural'),
               'scope', coalesce(verification->>'scope', 'artifact-only'),
-              'moderationStatus', case when verification->>'moderationStatus' = 'approved' then 'pending' else coalesce(verification->>'moderationStatus', 'pending') end,
-              'summary', 'A community report is queued for moderation review.'
-            )
+              'moderationStatus', case
+                when $2 then 'rejected'
+                when verification->>'moderationStatus' = 'approved' then 'pending'
+                else coalesce(verification->>'moderationStatus', 'pending')
+              end,
+              'summary', case
+                when $2 then 'Auto-hidden after community reports reached the review threshold.'
+                else 'A community report is queued for moderation review.'
+              end
+            ),
+            deleted_at = case when $2 then coalesce(deleted_at, now()) else deleted_at end,
+            updated_at = now()
           where name = $1
         `,
-        [normalizeKey(name)],
+        [normalizeKey(name), shouldHide],
       );
       await client.query("commit");
       return rowToPackageReport(row);

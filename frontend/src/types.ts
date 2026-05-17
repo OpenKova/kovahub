@@ -169,6 +169,8 @@ export type AuthUser = {
   websiteUrl?: string | null;
   company?: string | null;
   location?: string | null;
+  bannedAt?: number | null;
+  banReason?: string | null;
   createdAt?: number | null;
 };
 

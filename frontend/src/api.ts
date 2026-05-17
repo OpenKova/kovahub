@@ -209,6 +209,31 @@ export async function updatePackageModeration(
   });
 }
 
+export async function banReviewerUser(handle: string, reason?: string | null) {
+  return request<{ user: { id: string; handle: string; bannedAt: number | null; banReason?: string | null } }>(
+    `/api/v1/reviewer/users/${encodeURIComponent(handle)}/ban`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
+}
+
+export async function unbanReviewerUser(handle: string) {
+  return request<{ user: { id: string; handle: string; bannedAt: number | null; banReason?: string | null } }>(
+    `/api/v1/reviewer/users/${encodeURIComponent(handle)}/ban`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export async function hardDeleteReviewerPackage(name: string) {
+  return request<{ deleted: boolean }>(`/api/v1/reviewer/packages/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function publishPackage(payload: PublishPayload) {
   return request<PackageDetail>("/api/v1/packages", {
     method: "POST",

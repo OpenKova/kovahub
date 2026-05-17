@@ -53,6 +53,8 @@ import {
   getApiBase,
   getStoredToken,
   githubLoginUrl,
+  banReviewerUser,
+  hardDeleteReviewerPackage,
   isAuthError,
   packageDownloadUrl,
   postPackageComment,
@@ -2245,6 +2247,30 @@ function ModerationPanel() {
     }
   }
 
+  async function banReporter(report: PackageReport) {
+    setStatus(null);
+    setError(null);
+    try {
+      await banReviewerUser(report.user.handle, `Reviewer action from report ${report.id}.`);
+      setReports((current) => current.filter((candidate) => candidate.user.handle !== report.user.handle));
+      setStatus(`@${report.user.handle} banned.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "User ban failed.");
+    }
+  }
+
+  async function hardDeletePackageFromReport(report: PackageReport) {
+    setStatus(null);
+    setError(null);
+    try {
+      await hardDeleteReviewerPackage(report.packageName);
+      setReports((current) => current.filter((candidate) => candidate.packageName !== report.packageName));
+      setStatus(`${report.packageName} hard-deleted.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Package hard-delete failed.");
+    }
+  }
+
   if (!available) return null;
 
   return (
@@ -2279,6 +2305,12 @@ function ModerationPanel() {
               </button>
               <button type="button" onClick={() => void closeReport(report, "clean")}>
                 Mark clean
+              </button>
+              <button type="button" onClick={() => void banReporter(report)}>
+                Ban reporter
+              </button>
+              <button type="button" onClick={() => void hardDeletePackageFromReport(report)}>
+                Hard delete
               </button>
             </div>
           </article>

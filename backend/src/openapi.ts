@@ -52,6 +52,13 @@ export const openApiDocument = {
     "/api/v1/import/github": {
       post: { summary: "Import and publish from GitHub", responses: { "201": { description: "Published package" } } },
     },
+    "/api/v1/reviewer/users/{handle}/ban": {
+      post: { summary: "Ban a user", responses: { "200": { description: "Banned user" } } },
+      delete: { summary: "Unban a user", responses: { "200": { description: "Unbanned user" } } },
+    },
+    "/api/v1/reviewer/packages/{name}": {
+      delete: { summary: "Hard-delete a package", responses: { "200": { description: "Hard-delete result" } } },
+    },
     "/api/v1/me/backup": {
       get: { summary: "Export publisher package backup", responses: { "200": { description: "Backup snapshot" } } },
     },

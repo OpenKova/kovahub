@@ -34,6 +34,8 @@ export type UserAccount = AuthPrincipal & {
   websiteUrl?: string | null;
   company?: string | null;
   location?: string | null;
+  bannedAt?: number | null;
+  banReason?: string | null;
   createdAt: number;
 };
 
@@ -64,6 +66,8 @@ export type SessionPrincipal = AuthPrincipal & {
   websiteUrl?: string | null;
   company?: string | null;
   location?: string | null;
+  bannedAt?: number | null;
+  banReason?: string | null;
   createdAt?: number | null;
 };
 
@@ -198,6 +202,7 @@ export type RegistryRepository = {
   getOrganizationByHandle(handle: string): Promise<OrganizationRecord | null>;
   listOrganizationMembers(handle: string): Promise<OrganizationMemberRecord[]>;
   addOrganizationMember(handle: string, actor: AuthPrincipal, memberHandle: string, role: OrganizationRole): Promise<OrganizationMemberRecord | null>;
+  setUserBan(handle: string, reviewer: AuthPrincipal, input: { banned: boolean; reason?: string | null }): Promise<UserAccount | null>;
   listPackages(options?: ListPackagesOptions): Promise<{ items: PackageListItem[]; nextCursor: string | null }>;
   searchPackages(options: SearchPackagesOptions): Promise<Array<{ score: number; package: PackageListItem }>>;
   getPackage(name: string): Promise<PackageRecord | null>;
@@ -207,6 +212,7 @@ export type RegistryRepository = {
   renamePackage(name: string, user: AuthPrincipal, newName: string): Promise<PackageRecord | null>;
   transferPackage(name: string, user: AuthPrincipal, targetHandle: string): Promise<PackageRecord | null>;
   setPackageDeleted(name: string, user: AuthPrincipal, deleted: boolean): Promise<PackageRecord | null>;
+  hardDeletePackage(name: string, reviewer: AuthPrincipal): Promise<boolean>;
   yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null): Promise<PackageRecord | null>;
   getArchive(name: string, selector?: { version?: string; tag?: string }): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   recordDownload(name: string): Promise<void>;
@@ -232,6 +238,11 @@ export type ArchiveFileInput = {
 
 function now() {
   return Date.now();
+}
+
+export function autoHideReportThreshold() {
+  const value = Number.parseInt(process.env.KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD ?? "3", 10);
+  return Number.isFinite(value) && value > 0 ? value : 3;
 }
 
 function newId(prefix: string) {
@@ -546,6 +557,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       websiteUrl: null,
       company: null,
       location: null,
+      bannedAt: null,
+      banReason: null,
       createdAt: now(),
     };
     this.users.set(user.id, user);
@@ -596,6 +609,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       websiteUrl: null,
       company: null,
       location: null,
+      bannedAt: null,
+      banReason: null,
       createdAt: now(),
     };
     this.users.set(user.id, user);
@@ -630,6 +645,8 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       websiteUrl: input.websiteUrl ?? null,
       company: input.company ?? null,
       location: input.location ?? null,
+      bannedAt: null,
+      banReason: null,
       createdAt: typeof input.createdAt === "number" ? input.createdAt : now(),
     };
     this.users.set(user.id, user);
@@ -701,7 +718,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     if (!token) return null;
     token.lastUsedAt = now();
     const user = this.users.get(token.userId);
-    return user ? { id: user.id, handle: user.handle, email: user.email } : null;
+    return user && !user.bannedAt ? { id: user.id, handle: user.handle, email: user.email } : null;
   }
 
   async createDeviceAuthorization(input: {
@@ -820,6 +837,15 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     };
     this.organizationMembers.set(this.organizationMemberKey(organization.id, member.id), record);
     return record;
+  }
+
+  async setUserBan(handle: string, reviewer: AuthPrincipal, input: { banned: boolean; reason?: string | null }) {
+    const user = await this.findUserByHandle(handle);
+    if (!user) return null;
+    if (user.id === reviewer.id && input.banned) throw new Error("Reviewers cannot ban themselves.");
+    user.bannedAt = input.banned ? now() : null;
+    user.banReason = input.banned ? input.reason ?? null : null;
+    return user;
   }
 
   async listPackages(options: ListPackagesOptions = {}) {
@@ -986,6 +1012,22 @@ export class InMemoryRegistryRepository implements RegistryRepository {
     return pkg;
   }
 
+  async hardDeletePackage(name: string, _reviewer: AuthPrincipal) {
+    const pkg = await this.getPackage(name);
+    if (!pkg) return false;
+    this.packages.delete(normalizeKey(pkg.name));
+    for (const key of [...this.packageStars.keys()]) {
+      if (key.startsWith(`${normalizeKey(pkg.name)}:`)) this.packageStars.delete(key);
+    }
+    for (const [id, comment] of this.packageComments.entries()) {
+      if (normalizeKey(comment.packageName) === normalizeKey(pkg.name)) this.packageComments.delete(id);
+    }
+    for (const [id, report] of this.packageReports.entries()) {
+      if (normalizeKey(report.packageName) === normalizeKey(pkg.name)) this.packageReports.delete(id);
+    }
+    return true;
+  }
+
   async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {
     const pkg = await this.getPackage(name);
     if (!pkg) return null;
@@ -1127,13 +1169,28 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       createdAt: now(),
     };
     this.packageReports.set(report.id, report);
+    const openReports = [...this.packageReports.values()].filter(
+      (candidate) => normalizeKey(candidate.packageName) === normalizeKey(pkg.name) && candidate.status === "open",
+    ).length;
     pkg.verification = {
       tier: pkg.verification?.tier ?? "structural",
       scope: pkg.verification?.scope ?? "artifact-only",
       ...pkg.verification,
-      moderationStatus: pkg.verification?.moderationStatus === "approved" ? "pending" : pkg.verification?.moderationStatus ?? "pending",
-      summary: "A community report is queued for moderation review.",
+      moderationStatus:
+        openReports >= autoHideReportThreshold()
+          ? "rejected"
+          : pkg.verification?.moderationStatus === "approved"
+            ? "pending"
+            : pkg.verification?.moderationStatus ?? "pending",
+      summary:
+        openReports >= autoHideReportThreshold()
+          ? "Auto-hidden after community reports reached the review threshold."
+          : "A community report is queued for moderation review.",
     };
+    if (openReports >= autoHideReportThreshold()) {
+      pkg.deletedAt = now();
+      pkg.updatedAt = now();
+    }
     return report;
   }
 

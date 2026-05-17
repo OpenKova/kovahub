@@ -72,6 +72,12 @@ const reportListQuerySchema = versionListQuerySchema.extend({
 const reportParamsSchema = z.object({
   id: z.string().min(1),
 });
+const userHandleParamsSchema = z.object({
+  handle: z.string().trim().min(1).max(80),
+});
+const userBanSchema = z.object({
+  reason: z.string().trim().max(500).nullable().optional(),
+});
 const reportUpdateSchema = z.object({
   status: z.enum(["open", "reviewed", "dismissed"]),
   resolution: z.string().trim().max(1000).nullable().optional(),
@@ -274,6 +280,16 @@ function publicProfile(user: UserAccount, packages: PackageListItem[]) {
     location: user.location ?? null,
     createdAt: user.createdAt,
     stats,
+  };
+}
+
+function publicModerationUser(user: UserAccount) {
+  return {
+    id: user.id,
+    handle: user.handle,
+    displayName: user.displayName ?? user.handle,
+    bannedAt: user.bannedAt ?? null,
+    banReason: user.banReason ?? null,
   };
 }
 
@@ -716,6 +732,67 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { report: null };
     }
     return { report: publicPackageReport(report) };
+  });
+
+  app.post("/api/v1/reviewer/users/:handle/ban", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = userHandleParamsSchema.safeParse(request.params);
+    const body = userBanSchema.safeParse(request.body ?? {});
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid user ban request."
+          : body.error.issues[0]?.message ?? "Invalid user ban payload.",
+      };
+    }
+    try {
+      const user = await repo.setUserBan(params.data.handle, reviewer, {
+        banned: true,
+        reason: body.data.reason ?? null,
+      });
+      if (!user) {
+        reply.code(404);
+        return { user: null };
+      }
+      return { user: publicModerationUser(user) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "User ban failed." };
+    }
+  });
+
+  app.delete("/api/v1/reviewer/users/:handle/ban", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = userHandleParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid user ban request." };
+    }
+    const user = await repo.setUserBan(params.data.handle, reviewer, { banned: false });
+    if (!user) {
+      reply.code(404);
+      return { user: null };
+    }
+    return { user: publicModerationUser(user) };
+  });
+
+  app.delete("/api/v1/reviewer/packages/:name", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package hard-delete request." };
+    }
+    const deleted = await repo.hardDeletePackage(params.data.name, reviewer);
+    if (!deleted) {
+      reply.code(404);
+      return { deleted: false };
+    }
+    return { deleted: true };
   });
 
   app.get("/api/v1/me/organizations", async (request, reply) => {

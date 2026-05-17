@@ -1256,6 +1256,110 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("supports reviewer bans, report auto-hide, and package hard-delete", async () => {
+    const previousReviewers = process.env.KOVAHUB_REVIEWER_HANDLES;
+    const previousThreshold = process.env.KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD;
+    process.env.KOVAHUB_REVIEWER_HANDLES = "reviewer";
+    process.env.KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD = "2";
+    const repo = new InMemoryRegistryRepository();
+    const reviewer = await repo.createUser({
+      handle: "reviewer",
+      email: "reviewer@example.com",
+      passwordHash: "reviewer",
+    });
+    const app = await buildServer(repo);
+    try {
+      const userJwt = await signInWithGitHub(app);
+      const reviewerJwt = app.jwt.sign(
+        {
+          id: reviewer.id,
+          handle: reviewer.handle,
+          email: reviewer.email,
+        },
+        { sub: reviewer.id },
+      );
+
+      const publish = await app.inject({
+        method: "POST",
+        url: "/api/v1/packages",
+        headers: { authorization: `Bearer ${userJwt}` },
+        payload: {
+          name: "@tester/moderation-target",
+          displayName: "Moderation Target",
+          family: "code-plugin",
+          version: "0.1.0",
+          compatibility: {
+            pluginApi: "^1.0.0",
+            minGatewayVersion: "2026.3.0",
+          },
+        },
+      });
+      expect(publish.statusCode).toBe(201);
+
+      const banned = await app.inject({
+        method: "POST",
+        url: "/api/v1/reviewer/users/tester/ban",
+        headers: { authorization: `Bearer ${reviewerJwt}` },
+        payload: { reason: "policy abuse" },
+      });
+      expect(banned.statusCode).toBe(200);
+      expect(banned.json().user).toMatchObject({
+        handle: "tester",
+        bannedAt: expect.any(Number),
+        banReason: "policy abuse",
+      });
+
+      const blocked = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/tokens",
+        headers: { authorization: `Bearer ${userJwt}` },
+        payload: { name: "blocked" },
+      });
+      expect(blocked.statusCode).toBe(403);
+      expect(blocked.json().error).toContain("Account is banned");
+
+      const unbanned = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/reviewer/users/tester/ban",
+        headers: { authorization: `Bearer ${reviewerJwt}` },
+      });
+      expect(unbanned.statusCode).toBe(200);
+      expect(unbanned.json().user).toMatchObject({
+        handle: "tester",
+        bannedAt: null,
+        banReason: null,
+      });
+
+      const packagePath = "/api/v1/packages/%40tester%2Fmoderation-target";
+      for (const reason of ["First report.", "Second report."]) {
+        const report = await app.inject({
+          method: "POST",
+          url: `${packagePath}/report`,
+          headers: { authorization: `Bearer ${userJwt}` },
+          payload: { reason },
+        });
+        expect(report.statusCode).toBe(201);
+      }
+
+      const hidden = await app.inject(packagePath);
+      expect(hidden.statusCode).toBe(404);
+
+      const hardDeleted = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/reviewer/packages/%40tester%2Fmoderation-target",
+        headers: { authorization: `Bearer ${reviewerJwt}` },
+      });
+      expect(hardDeleted.statusCode).toBe(200);
+      expect(hardDeleted.json()).toEqual({ deleted: true });
+    } finally {
+      if (previousReviewers === undefined) delete process.env.KOVAHUB_REVIEWER_HANDLES;
+      else process.env.KOVAHUB_REVIEWER_HANDLES = previousReviewers;
+      if (previousThreshold === undefined) delete process.env.KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD;
+      else process.env.KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD = previousThreshold;
+      await app.close();
+    }
+  });
+
   it("allows browser clients to revoke API tokens", async () => {
     const app = await buildServer();
     const jwt = await signInWithGitHub(app);

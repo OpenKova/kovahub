@@ -110,6 +110,8 @@ function publicUser(user: AuthPrincipal | UserAccount) {
     websiteUrl: account?.websiteUrl ?? null,
     company: account?.company ?? null,
     location: account?.location ?? null,
+    bannedAt: account?.bannedAt ?? null,
+    banReason: account?.banReason ?? null,
     createdAt: account?.createdAt ?? null,
   };
 }
@@ -126,6 +128,8 @@ function sessionPrincipal(user: UserAccount): SessionPrincipal {
     websiteUrl: user.websiteUrl ?? null,
     company: user.company ?? null,
     location: user.location ?? null,
+    bannedAt: user.bannedAt ?? null,
+    banReason: user.banReason ?? null,
     createdAt: user.createdAt,
   };
 }
@@ -341,6 +345,10 @@ async function requireSessionAuth(
   const user = await verifyJwtPrincipal(request);
   if (user) {
     const account = await resolveSessionPrincipal(user, repo);
+    if (account?.bannedAt) {
+      reply.code(403).send({ error: account.banReason ? `Account is banned: ${account.banReason}` : "Account is banned." });
+      return null;
+    }
     if (account) return { id: account.id, handle: account.handle, email: account.email };
     reply.code(401).send({ error: "Session expired. Sign in with GitHub again." });
     return null;
@@ -357,6 +365,10 @@ export async function requireAuth(
   const jwtUser = await verifyJwtPrincipal(request);
   if (jwtUser) {
     const account = await resolveSessionPrincipal(jwtUser, repo);
+    if (account?.bannedAt) {
+      reply.code(403).send({ error: account.banReason ? `Account is banned: ${account.banReason}` : "Account is banned." });
+      return null;
+    }
     if (account) return { id: account.id, handle: account.handle, email: account.email };
     reply.code(401).send({ error: "Session expired. Sign in with GitHub again." });
     return null;
@@ -432,6 +444,7 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
       const accessToken = await fetchGitHubAccessToken(parsed.data.code, config);
       const profile = await fetchGitHubProfile(accessToken);
       const user = await repo.findOrCreateGitHubUser(profile);
+      if (user.bannedAt) throw new Error(user.banReason ? `Account is banned: ${user.banReason}` : "Account is banned.");
       const token = app.jwt.sign(sessionPrincipal(user), { sub: user.id });
       return redirectToFrontendAuthCallback(reply, { token, returnTo });
     } catch (error) {
