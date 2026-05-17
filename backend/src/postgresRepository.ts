@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { archiveStorageKey, createArchiveStoreFromEnv, type ArchiveStore } from "./archiveStore.js";
+import { expandSearchTerms } from "./search.js";
 import {
   normalizeCompatibility,
   toPackageListItem,
@@ -228,14 +229,25 @@ function addParam(params: unknown[], value: unknown) {
   return `$${params.length}`;
 }
 
-function packageSearchPredicate(param: string) {
+function packageSearchPredicate(queryParam: string, termsParam: string) {
   return `(
-    to_tsvector('simple', coalesce(p.name, '') || ' ' || coalesce(p.display_name, '') || ' ' || coalesce(p.summary, '') || ' ' || array_to_string(p.topics, ' '))
-      @@ plainto_tsquery('simple', ${param})
-    or p.name ilike '%' || ${param} || '%'
-    or p.display_name ilike '%' || ${param} || '%'
-    or coalesce(p.summary, '') ilike '%' || ${param} || '%'
-    or exists(select 1 from unnest(p.topics) topic where topic ilike '%' || ${param} || '%')
+    to_tsvector('english', coalesce(p.name, '') || ' ' || coalesce(p.display_name, '') || ' ' || coalesce(p.summary, '') || ' ' || array_to_string(p.topics, ' ') || ' ' || coalesce(p.runtime_id, '') || ' ' || coalesce(p.capabilities::text, '') || ' ' || coalesce(p.compatibility::text, ''))
+      @@ plainto_tsquery('english', ${queryParam})
+    or p.name ilike '%' || ${queryParam} || '%'
+    or p.display_name ilike '%' || ${queryParam} || '%'
+    or coalesce(p.summary, '') ilike '%' || ${queryParam} || '%'
+    or exists(select 1 from unnest(p.topics) topic where topic ilike '%' || ${queryParam} || '%')
+    or exists(
+      select 1
+      from unnest(${termsParam}::text[]) term
+      where p.name ilike '%' || term || '%'
+        or p.display_name ilike '%' || term || '%'
+        or coalesce(p.summary, '') ilike '%' || term || '%'
+        or coalesce(p.runtime_id, '') ilike '%' || term || '%'
+        or coalesce(p.capabilities::text, '') ilike '%' || term || '%'
+        or coalesce(p.compatibility::text, '') ilike '%' || term || '%'
+        or exists(select 1 from unnest(p.topics) topic where topic ilike '%' || term || '%')
+    )
   )`;
 }
 
@@ -988,7 +1000,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
       where.push(`${addParam(params, normalizeTopics([options.tag])[0] ?? "")} = any(p.topics)`);
     }
     if (options.q?.trim() && options.q.trim() !== "*") {
-      where.push(packageSearchPredicate(addParam(params, options.q.trim())));
+      where.push(packageSearchPredicate(addParam(params, options.q.trim()), addParam(params, expandSearchTerms(options.q))));
     }
 
     params.push(limit + 1, offset);
@@ -1026,17 +1038,23 @@ export class PostgresRegistryRepository implements RegistryRepository {
       where.push(`${addParam(params, normalizeTopics([options.tag])[0] ?? "")} = any(p.topics)`);
     }
     if (options.q.trim() && options.q.trim() !== "*") {
-      const qParam = addParam(params, options.q.trim());
-      where.push(packageSearchPredicate(qParam));
+      const originalQParam = addParam(params, options.q.trim());
+      const termsParam = addParam(params, expandSearchTerms(options.q));
+      where.push(packageSearchPredicate(originalQParam, termsParam));
       scoreExpression = `
         case
-          when lower(p.name) = lower(${qParam}) then 100
-          when p.name ilike '%' || ${qParam} || '%' then 80
-          when p.display_name ilike '%' || ${qParam} || '%' then 60
-          when exists(select 1 from unnest(p.topics) topic where lower(topic) = lower(${qParam})) then 50
-          when coalesce(p.summary, '') ilike '%' || ${qParam} || '%' then 30
+          when lower(p.name) = lower(${originalQParam}) then 140
+          when p.name ilike '%' || ${originalQParam} || '%' then 95
+          when p.display_name ilike '%' || ${originalQParam} || '%' then 75
+          when exists(select 1 from unnest(p.topics) topic where lower(topic) = lower(${originalQParam})) then 60
+          when coalesce(p.summary, '') ilike '%' || ${originalQParam} || '%' then 35
           else 10
-        end + ln(1 + ${discoveryScoreExpression()})
+        end
+        + (ts_rank(
+            to_tsvector('english', coalesce(p.name, '') || ' ' || coalesce(p.display_name, '') || ' ' || coalesce(p.summary, '') || ' ' || array_to_string(p.topics, ' ') || ' ' || coalesce(p.runtime_id, '') || ' ' || coalesce(p.capabilities::text, '') || ' ' || coalesce(p.compatibility::text, '')),
+            plainto_tsquery('english', ${originalQParam})
+          ) * 30)
+        + ln(1 + ${discoveryScoreExpression()})
       `;
     } else {
       scoreExpression = `1 + ln(1 + ${discoveryScoreExpression()})`;

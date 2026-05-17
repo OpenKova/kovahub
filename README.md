@@ -121,6 +121,7 @@ Implemented in the scaffold:
 - Reviewer assignment workflow and authenticated notification feed for reports/moderation events.
 - Production ops basics: health/readiness endpoints, optional protected metrics, built-in rate limits, and backup export retention controls.
 - Unified search page with all/skills/plugins filters.
+- Search ranking with local query expansion, vector-style similarity scoring, matched fields, highlights, and Postgres search indexes.
 - Audit page for security scan and moderation signals.
 - Owner package settings for metadata edits, rename, transfer, restore, delete, and yanking.
 - Organization publishers with member roles.
@@ -292,9 +293,8 @@ pnpm --filter @kovahub/cli dev list
 KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth/install flows, import/export, moderation, documentation rendering, and compatibility surfaces. Remaining hardening work is:
 
 1. Add hosted scanner integrations, signed publish metadata, and rebuild verification beyond the built-in structural scanner.
-2. Add semantic/vector search.
-3. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
-4. Run exact native Kova client integration tests against the deployed registry URL.
+2. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
+3. Run exact native Kova client integration tests against the deployed registry URL.
 
 ## References
 

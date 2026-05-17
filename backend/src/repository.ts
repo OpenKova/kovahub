@@ -18,6 +18,7 @@ import {
   type PublishPackageInput,
 } from "./contracts.js";
 import { scanPackageArtifact, type SecurityScanFile } from "./securityScan.js";
+import { searchPackage } from "./search.js";
 
 export type AuthPrincipal = {
   id: string;
@@ -225,7 +226,7 @@ export type RegistryRepository = {
   addOrganizationMember(handle: string, actor: AuthPrincipal, memberHandle: string, role: OrganizationRole): Promise<OrganizationMemberRecord | null>;
   setUserBan(handle: string, reviewer: AuthPrincipal, input: { banned: boolean; reason?: string | null }): Promise<UserAccount | null>;
   listPackages(options?: ListPackagesOptions): Promise<{ items: PackageListItem[]; nextCursor: string | null }>;
-  searchPackages(options: SearchPackagesOptions): Promise<Array<{ score: number; package: PackageListItem }>>;
+  searchPackages(options: SearchPackagesOptions): Promise<Array<{ score: number; package: PackageListItem; matchedFields?: string[]; highlights?: string[] }>>;
   getPackage(name: string): Promise<PackageRecord | null>;
   getPackageVersion(name: string, version: string): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   publishPackage(input: PreparedPublishPackageInput, owner: AuthPrincipal): Promise<PackageRecord>;
@@ -355,26 +356,11 @@ export function buildFileMetadata(files: ArchiveFileInput[]): PackageFile[] {
 function packageMatches(pkg: PackageRecord, query: string) {
   const q = query.trim().toLowerCase();
   if (!q || q === "*") return true;
-  return [
-    pkg.name,
-    pkg.displayName,
-    pkg.summary ?? "",
-    pkg.ownerHandle ?? "",
-    ...(pkg.topics ?? []),
-    ...(pkg.capabilityTags ?? []),
-  ].some((value) => value.toLowerCase().includes(q));
+  return searchPackage(pkg, query, discoveryScore(pkg)).score > Math.log1p(discoveryScore(pkg));
 }
 
 function scorePackage(pkg: PackageRecord, query: string) {
-  const q = query.trim().toLowerCase();
-  const signalBoost = Math.log1p(discoveryScore(pkg));
-  if (!q || q === "*") return 1 + signalBoost;
-  if (pkg.name.toLowerCase() === q) return 100 + signalBoost;
-  if (pkg.name.toLowerCase().includes(q)) return 80 + signalBoost;
-  if (pkg.displayName.toLowerCase().includes(q)) return 60 + signalBoost;
-  if ((pkg.topics ?? []).some((tag) => tag.toLowerCase() === q)) return 50 + signalBoost;
-  if ((pkg.summary ?? "").toLowerCase().includes(q)) return 30 + signalBoost;
-  return 10 + signalBoost;
+  return searchPackage(pkg, query, discoveryScore(pkg));
 }
 
 function normalizeTopic(value: string) {
@@ -906,7 +892,15 @@ export class InMemoryRegistryRepository implements RegistryRepository {
         if (options.tag && !(pkg.topics ?? []).includes(normalizeTopic(options.tag))) return false;
         return packageMatches(pkg, options.q);
       })
-      .map((pkg) => ({ score: scorePackage(pkg, options.q), package: toPackageListItem(pkg) }))
+      .map((pkg) => {
+        const match = scorePackage(pkg, options.q);
+        return {
+          score: match.score,
+          matchedFields: match.matchedFields,
+          highlights: match.highlights,
+          package: toPackageListItem(pkg),
+        };
+      })
       .sort((left, right) => right.score - left.score || right.package.updatedAt - left.package.updatedAt)
       .slice(0, limit);
   }

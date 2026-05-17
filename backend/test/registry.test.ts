@@ -264,16 +264,17 @@ describe("registry api", () => {
 
       const suggestions = await app.inject("/api/v1/search/suggestions?q=context");
       expect(suggestions.statusCode).toBe(200);
-      expect(suggestions.json()).toMatchObject({
-        packages: [
+      const suggestionBody = suggestions.json();
+      expect(suggestionBody.packages).toEqual(
+        expect.arrayContaining([
           expect.objectContaining({
             name: "@openkova/context-bridge",
             ownerHandle: "openkova",
           }),
-        ],
-        tags: expect.arrayContaining([expect.objectContaining({ tag: "context", count: 1 })]),
-        publishers: expect.arrayContaining([expect.objectContaining({ handle: "openkova", count: 1 })]),
-      });
+        ]),
+      );
+      expect(suggestionBody.tags).toEqual(expect.arrayContaining([expect.objectContaining({ tag: "context", count: 1 })]));
+      expect(suggestionBody.publishers).toEqual(expect.arrayContaining([expect.objectContaining({ handle: "openkova", count: 2 })]));
     } finally {
       await app.close();
     }
@@ -360,6 +361,13 @@ describe("registry api", () => {
     expect(search.statusCode).toBe(200);
     const body = search.json<{ results: Array<{ package: { name: string } }> }>();
     expect(body.results[0]?.package.name).toBe("@openkova/context-bridge");
+
+    const semanticSearch = await app.inject("/api/v1/packages/search?q=connector");
+    expect(semanticSearch.statusCode).toBe(200);
+    expect(semanticSearch.json().results[0]).toMatchObject({
+      package: { name: "@openkova/context-bridge" },
+      matchedFields: expect.arrayContaining(["capabilities"]),
+    });
 
     const plugins = await app.inject("/api/v1/plugins?limit=10");
     expect(plugins.statusCode).toBe(200);
