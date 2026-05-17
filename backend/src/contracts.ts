@@ -43,6 +43,30 @@ export type PackageVerificationSummary = {
   scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
   moderationStatus?: "pending" | "approved" | "rejected";
   riskLevel?: "unknown" | "low" | "medium" | "high";
+  signature?: {
+    algorithm: "sha256" | "hmac-sha256";
+    digest?: string;
+    signature?: string;
+    keyId?: string;
+    signer?: string;
+    signedAt?: number;
+    verified: boolean;
+    reason?: string;
+  };
+  scanner?: {
+    provider: "structural" | "webhook" | "manual";
+    status: "clean" | "suspicious" | "malicious" | "queued" | "failed" | "not-run";
+    checkedAt?: number;
+    url?: string;
+  };
+  rebuild?: {
+    status: "not-run" | "queued" | "passed" | "failed";
+    checkedAt?: number;
+    command?: string;
+    logUrl?: string;
+    sourceRepo?: string;
+    sourceCommit?: string;
+  };
   findings?: Array<{
     severity: "low" | "medium" | "high";
     code: string;
@@ -160,6 +184,17 @@ export const capabilityInputSchema = z
   })
   .optional();
 
+export const publishSignatureSchema = z
+  .object({
+    algorithm: z.enum(["sha256", "hmac-sha256"]).default("sha256"),
+    digest: z.string().trim().min(1).optional(),
+    signature: z.string().trim().min(1).optional(),
+    keyId: z.string().trim().min(1).max(120).optional(),
+    signer: z.string().trim().min(1).max(200).optional(),
+    signedAt: z.coerce.number().int().positive().optional(),
+  })
+  .optional();
+
 export const publishPackageSchema = z
   .object({
     name: z.string().trim().min(1).max(214).regex(packageNameLike),
@@ -173,6 +208,7 @@ export const publishPackageSchema = z
     tags: z.array(z.string().trim().min(1).max(48)).default([]),
     compatibility: compatibilityInputSchema,
     capabilities: capabilityInputSchema,
+    signature: publishSignatureSchema,
     archiveBase64: z.string().optional(),
     files: z.array(fileInputSchema).default([]),
   })

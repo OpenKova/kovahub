@@ -798,8 +798,12 @@ function DetailPanel({
               <InfoCell label="securityScan" value={formatStatus(verification?.scanStatus)} />
               <InfoCell label="tier" value={formatStatus(verification?.tier)} />
               <InfoCell label="risk" value={formatStatus(verification?.riskLevel)} />
+              <InfoCell label="signature" value={verification?.signature ? (verification.signature.verified ? "verified" : "unverified") : "not provided"} />
+              <InfoCell label="scanner" value={formatStatus(verification?.scanner?.status)} />
+              <InfoCell label="rebuild" value={formatStatus(verification?.rebuild?.status)} />
             </div>
             {verification?.summary ? <p className="content-muted">{verification.summary}</p> : null}
+            {verification?.signature?.reason ? <p className="content-muted">{verification.signature.reason}</p> : null}
             {verification?.findings?.length ? (
               <div className="finding-list">
                 {verification.findings.map((finding) => (

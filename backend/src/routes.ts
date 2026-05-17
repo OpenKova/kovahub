@@ -99,6 +99,21 @@ const packageModerationSchema = z.object({
   riskLevel: z.enum(["unknown", "low", "medium", "high"]).optional(),
   summary: z.string().trim().max(500).nullable().optional(),
 });
+const packageScanSchema = z.object({
+  status: z.enum(["clean", "suspicious", "malicious", "queued", "failed", "not-run"]),
+  provider: z.enum(["structural", "webhook", "manual"]).default("manual"),
+  url: z.string().url().max(500).optional(),
+  riskLevel: z.enum(["unknown", "low", "medium", "high"]).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
+});
+const packageRebuildSchema = z.object({
+  status: z.enum(["not-run", "queued", "passed", "failed"]),
+  command: z.string().trim().max(240).optional(),
+  logUrl: z.string().url().max(500).optional(),
+  sourceRepo: z.string().trim().max(500).optional(),
+  sourceCommit: z.string().trim().max(120).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
+});
 const packageSettingsSchema = z.object({
   displayName: z.string().trim().min(1).max(120).optional(),
   summary: z.string().trim().max(500).nullable().optional(),
@@ -1436,6 +1451,71 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
           packageName: pkg.name,
         });
       }
+    }
+    return publicPackageDetail(pkg);
+  });
+
+  app.post("/api/v1/reviewer/packages/:name/scan", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageScanSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid scanner result request."
+          : body.error.issues[0]?.message ?? "Invalid scanner result payload.",
+      };
+    }
+    const scanStatus = body.data.status === "queued" || body.data.status === "failed" ? "pending" : body.data.status;
+    const pkg = await repo.updatePackageModeration(params.data.name, reviewer, {
+      scanStatus,
+      riskLevel: body.data.riskLevel,
+      summary: body.data.summary ?? undefined,
+      scanner: {
+        provider: body.data.provider,
+        status: body.data.status,
+        checkedAt: Date.now(),
+        url: body.data.url,
+      },
+    });
+    if (!pkg) {
+      reply.code(404);
+      return { package: null };
+    }
+    return publicPackageDetail(pkg);
+  });
+
+  app.post("/api/v1/reviewer/packages/:name/rebuild", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageRebuildSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid rebuild result request."
+          : body.error.issues[0]?.message ?? "Invalid rebuild result payload.",
+      };
+    }
+    const pkg = await repo.updatePackageModeration(params.data.name, reviewer, {
+      tier: body.data.status === "passed" ? "rebuild-verified" : undefined,
+      scope: body.data.status === "passed" ? "dependency-graph-aware" : undefined,
+      summary: body.data.summary ?? undefined,
+      rebuild: {
+        status: body.data.status,
+        checkedAt: Date.now(),
+        command: body.data.command,
+        logUrl: body.data.logUrl,
+        sourceRepo: body.data.sourceRepo,
+        sourceCommit: body.data.sourceCommit,
+      },
+    });
+    if (!pkg) {
+      reply.code(404);
+      return { package: null };
     }
     return publicPackageDetail(pkg);
   });

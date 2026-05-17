@@ -77,6 +77,12 @@ export const openApiDocument = {
     "/api/v1/reviewer/packages/{name}/merge": {
       post: { summary: "Merge duplicate package into a target", responses: { "200": { description: "Merged package" } } },
     },
+    "/api/v1/reviewer/packages/{name}/scan": {
+      post: { summary: "Record hosted or manual scanner result", responses: { "200": { description: "Updated package verification" } } },
+    },
+    "/api/v1/reviewer/packages/{name}/rebuild": {
+      post: { summary: "Record rebuild verification result", responses: { "200": { description: "Updated package verification" } } },
+    },
     "/api/v1/me/backup": {
       get: { summary: "Export publisher package backup", responses: { "200": { description: "Backup snapshot" } } },
     },

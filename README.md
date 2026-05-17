@@ -129,7 +129,7 @@ Implemented in the scaffold:
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
 - ZIP archive download endpoints.
-- Structural archive security scan signals, source/provenance metadata, and moderation status in package verification metadata.
+- Structural archive security scan signals, source/provenance metadata, publish signature receipts, scanner hooks, rebuild verification records, and moderation status in package verification metadata.
 - First-party CLI login, publish, install, update, sync, pin, unpin, and local list workflows.
 - Frontend compose publishing, archive ZIP publishing, and API token management.
 - OpenAPI document at `/openapi.json`, baseline security headers, and GitHub Actions CI.
@@ -271,6 +271,7 @@ Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MA
 Rendered README/SKILL documentation is capped by `KOVAHUB_MAX_DOCUMENTATION_BYTES`. Report auto-hide defaults to 3 open reports and can be changed with `KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD`.
 Production rate limits are enabled automatically when `NODE_ENV=production`, or explicitly with `KOVAHUB_RATE_LIMIT_ENABLED=1`. Metrics are public unless `KOVAHUB_METRICS_TOKEN` is set.
 Backup exports can be trimmed with `KOVAHUB_BACKUP_RETENTION_DAYS`, `KOVAHUB_BACKUP_MAX_VERSIONS`, and `KOVAHUB_BACKUP_INCLUDE_ARCHIVES=false`.
+Hosted scanner and signing hooks are optional: `KOVAHUB_SCANNER_WEBHOOK_URL` queues scanner metadata, while `KOVAHUB_PUBLISH_SIGNING_SECRET` and `KOVAHUB_PUBLISH_SIGNING_KEY_ID` generate registry publish receipt signatures.
 
 ## CLI
 
@@ -292,9 +293,8 @@ pnpm --filter @kovahub/cli dev list
 
 KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth/install flows, import/export, moderation, documentation rendering, and compatibility surfaces. Remaining hardening work is:
 
-1. Add hosted scanner integrations, signed publish metadata, and rebuild verification beyond the built-in structural scanner.
-2. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
-3. Run exact native Kova client integration tests against the deployed registry URL.
+1. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
+2. Run exact native Kova client integration tests against the deployed registry URL.
 
 ## References
 

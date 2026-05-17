@@ -32,6 +32,30 @@ export type PackageVerification = {
   scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
   moderationStatus?: "pending" | "approved" | "rejected";
   riskLevel?: "unknown" | "low" | "medium" | "high";
+  signature?: {
+    algorithm: "sha256" | "hmac-sha256";
+    digest?: string;
+    signature?: string;
+    keyId?: string;
+    signer?: string;
+    signedAt?: number;
+    verified: boolean;
+    reason?: string;
+  };
+  scanner?: {
+    provider: "structural" | "webhook" | "manual";
+    status: "clean" | "suspicious" | "malicious" | "queued" | "failed" | "not-run";
+    checkedAt?: number;
+    url?: string;
+  };
+  rebuild?: {
+    status: "not-run" | "queued" | "passed" | "failed";
+    checkedAt?: number;
+    command?: string;
+    logUrl?: string;
+    sourceRepo?: string;
+    sourceCommit?: string;
+  };
   findings?: Array<{
     severity: "low" | "medium" | "high";
     code: string;
@@ -255,6 +279,14 @@ export type PublishPayload = {
     pluginApi?: string;
     minGatewayVersion?: string;
   };
+  signature?: {
+    algorithm?: "sha256" | "hmac-sha256";
+    digest?: string;
+    signature?: string;
+    keyId?: string;
+    signer?: string;
+    signedAt?: number;
+  };
   files: Array<{
     path: string;
     content: string;
@@ -274,6 +306,7 @@ export type PublishArchiveMetadata = {
     pluginApi?: string;
     minGatewayVersion?: string;
   };
+  signature?: PublishPayload["signature"];
 };
 
 export type PackageSettingsPayload = {

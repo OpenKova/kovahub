@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { strToU8, zipSync } from "fflate";
 import {
   normalizeCompatibility,
@@ -188,6 +188,10 @@ export type PackageModerationInput = {
   scanStatus?: PackageVerificationSummary["scanStatus"];
   riskLevel?: PackageVerificationSummary["riskLevel"];
   summary?: string | null;
+  tier?: PackageVerificationSummary["tier"];
+  scope?: PackageVerificationSummary["scope"];
+  scanner?: PackageVerificationSummary["scanner"];
+  rebuild?: PackageVerificationSummary["rebuild"];
 };
 
 export type OrganizationInput = {
@@ -387,10 +391,14 @@ export function mergeVerification(
     tier: current?.tier ?? "structural",
     scope: current?.scope ?? "artifact-only",
     ...current,
+    ...(input.tier !== undefined ? { tier: input.tier } : {}),
+    ...(input.scope !== undefined ? { scope: input.scope } : {}),
     ...(input.moderationStatus !== undefined ? { moderationStatus: input.moderationStatus } : {}),
     ...(input.scanStatus !== undefined ? { scanStatus: input.scanStatus } : {}),
     ...(input.riskLevel !== undefined ? { riskLevel: input.riskLevel } : {}),
     ...(input.summary !== undefined ? { summary: input.summary ?? undefined } : {}),
+    ...(input.scanner !== undefined ? { scanner: input.scanner } : {}),
+    ...(input.rebuild !== undefined ? { rebuild: input.rebuild } : {}),
   };
 }
 
@@ -506,6 +514,73 @@ export function createVerificationSummary(input: {
   });
 }
 
+function publishSignaturePayload(input: PreparedPublishPackageInput, sha256hash: string) {
+  return `${normalizeKey(input.name)}@${input.version}:${sha256hash}`;
+}
+
+function expectedPublishHmac(input: PreparedPublishPackageInput, sha256hash: string) {
+  const secret = process.env.KOVAHUB_PUBLISH_SIGNING_SECRET;
+  if (!secret) return null;
+  return createHmac("sha256", secret).update(publishSignaturePayload(input, sha256hash)).digest("hex");
+}
+
+function withArtifactVerification(
+  verification: PackageVerificationSummary | null | undefined,
+  input: PreparedPublishPackageInput,
+  sha256hash: string,
+): PackageVerificationSummary {
+  const current: PackageVerificationSummary = {
+    tier: verification?.tier ?? "structural",
+    scope: verification?.scope ?? "artifact-only",
+    ...verification,
+  };
+  const provided = input.signature;
+  if (provided) {
+    if (provided.algorithm === "sha256") {
+      current.signature = {
+        algorithm: "sha256",
+        digest: provided.digest,
+        keyId: provided.keyId,
+        signer: provided.signer,
+        signedAt: provided.signedAt,
+        verified: provided.digest === sha256hash,
+        reason: provided.digest === sha256hash ? "Artifact digest matches publish signature metadata." : "Artifact digest does not match publish signature metadata.",
+      };
+    } else {
+      const expected = expectedPublishHmac(input, sha256hash);
+      current.signature = {
+        algorithm: "hmac-sha256",
+        digest: sha256hash,
+        signature: provided.signature,
+        keyId: provided.keyId,
+        signer: provided.signer,
+        signedAt: provided.signedAt,
+        verified: Boolean(expected && provided.signature === expected),
+        reason: expected
+          ? provided.signature === expected
+            ? "HMAC publish signature verified."
+            : "HMAC publish signature did not match."
+          : "KOVAHUB_PUBLISH_SIGNING_SECRET is not configured.",
+      };
+    }
+  } else {
+    const serverSignature = expectedPublishHmac(input, sha256hash);
+    if (serverSignature) {
+      current.signature = {
+        algorithm: "hmac-sha256",
+        digest: sha256hash,
+        signature: serverSignature,
+        keyId: process.env.KOVAHUB_PUBLISH_SIGNING_KEY_ID,
+        signer: "kovahub-registry",
+        signedAt: now(),
+        verified: true,
+        reason: "Registry generated publish receipt signature.",
+      };
+    }
+  }
+  return current;
+}
+
 export function createPackageVersion(input: {
   payload: PreparedPublishPackageInput;
   compatibility: PackageCompatibility | null;
@@ -517,16 +592,18 @@ export function createPackageVersion(input: {
     : input.payload.archiveBase64
       ? Buffer.from(input.payload.archiveBase64, "base64")
       : buildArchive(sourceFiles);
+  const sha256hash = sha256Hex(archive);
+  const verification = createVerificationSummary({ ...input, files: sourceFiles });
   return {
     version: input.payload.version,
     createdAt: now(),
     changelog: input.payload.changelog,
     distTags: ["latest"],
     files: input.payload.archiveFiles ?? buildFileMetadata(sourceFiles),
-    sha256hash: sha256Hex(archive),
+    sha256hash,
     compatibility: input.compatibility,
     capabilities: input.capabilities,
-    verification: createVerificationSummary({ ...input, files: sourceFiles }),
+    verification: withArtifactVerification(verification, input.payload, sha256hash),
     documentation: input.payload.documentation ?? documentationFromFiles(sourceFiles),
     archive,
   };

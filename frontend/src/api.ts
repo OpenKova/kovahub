@@ -237,6 +237,39 @@ export async function updatePackageModeration(
   });
 }
 
+export async function recordReviewerScan(
+  name: string,
+  payload: {
+    status: "clean" | "suspicious" | "malicious" | "queued" | "failed" | "not-run";
+    provider?: "structural" | "webhook" | "manual";
+    url?: string;
+    riskLevel?: "unknown" | "low" | "medium" | "high";
+    summary?: string | null;
+  },
+) {
+  return request<PackageDetail>(`/api/v1/reviewer/packages/${encodeURIComponent(name)}/scan`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function recordReviewerRebuild(
+  name: string,
+  payload: {
+    status: "not-run" | "queued" | "passed" | "failed";
+    command?: string;
+    logUrl?: string;
+    sourceRepo?: string;
+    sourceCommit?: string;
+    summary?: string | null;
+  },
+) {
+  return request<PackageDetail>(`/api/v1/reviewer/packages/${encodeURIComponent(name)}/rebuild`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function banReviewerUser(handle: string, reason?: string | null) {
   return request<{ user: { id: string; handle: string; bannedAt: number | null; banReason?: string | null } }>(
     `/api/v1/reviewer/users/${encodeURIComponent(handle)}/ban`,

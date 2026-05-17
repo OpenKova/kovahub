@@ -516,72 +516,92 @@ describe("registry api", () => {
   });
 
   it("publishes a plugin package with latest tag and downloadable archive", async () => {
+    const previousSigningSecret = process.env.KOVAHUB_PUBLISH_SIGNING_SECRET;
+    const previousSigningKeyId = process.env.KOVAHUB_PUBLISH_SIGNING_KEY_ID;
+    process.env.KOVAHUB_PUBLISH_SIGNING_SECRET = "test-signing-secret";
+    process.env.KOVAHUB_PUBLISH_SIGNING_KEY_ID = "test-key";
     const app = await buildServer();
     const token = await signInWithGitHub(app);
 
-    const publish = await app.inject({
-      method: "POST",
-      url: "/api/v1/packages",
-      headers: { authorization: `Bearer ${token}` },
-      payload: {
-        name: "@tester/demo-plugin",
-        displayName: "Demo Plugin",
-        family: "code-plugin",
-        version: "0.1.0",
-        summary: "Demo plugin",
-        compatibility: {
-          pluginApi: "^1.0.0",
-          minGatewayVersion: "2026.3.0",
+    try {
+      const publish = await app.inject({
+        method: "POST",
+        url: "/api/v1/packages",
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          name: "@tester/demo-plugin",
+          displayName: "Demo Plugin",
+          family: "code-plugin",
+          version: "0.1.0",
+          summary: "Demo plugin",
+          compatibility: {
+            pluginApi: "^1.0.0",
+            minGatewayVersion: "2026.3.0",
+          },
+          tags: ["demo", "gateway"],
+          files: [
+            {
+              path: "package.json",
+              content: "{\"name\":\"@tester/demo-plugin\",\"version\":\"0.1.0\"}\n",
+              contentType: "application/json",
+            },
+            {
+              path: "README.md",
+              content: "# Demo Plugin\n\nDemo plugin docs.\n",
+              contentType: "text/markdown",
+            },
+          ],
         },
-        tags: ["demo", "gateway"],
-        files: [
-          {
-            path: "package.json",
-            content: "{\"name\":\"@tester/demo-plugin\",\"version\":\"0.1.0\"}\n",
-            contentType: "application/json",
-          },
-          {
-            path: "README.md",
-            content: "# Demo Plugin\n\nDemo plugin docs.\n",
-            contentType: "text/markdown",
-          },
-        ],
-      },
-    });
-    expect(publish.statusCode).toBe(201);
-    expect(publish.json().package.latestVersion).toBe("0.1.0");
-    expect(publish.json().package.topics).toEqual(["demo", "gateway"]);
-    expect(publish.json().package).toMatchObject({
-      scanStatus: "clean",
-      moderationStatus: "pending",
-      verification: {
+      });
+      expect(publish.statusCode).toBe(201);
+      expect(publish.json().package.latestVersion).toBe("0.1.0");
+      expect(publish.json().package.topics).toEqual(["demo", "gateway"]);
+      expect(publish.json().package).toMatchObject({
         scanStatus: "clean",
         moderationStatus: "pending",
-        riskLevel: "medium",
-      },
-    });
+        verification: {
+          scanStatus: "clean",
+          moderationStatus: "pending",
+          riskLevel: "medium",
+          signature: {
+            algorithm: "hmac-sha256",
+            keyId: "test-key",
+            signer: "kovahub-registry",
+            verified: true,
+          },
+        },
+      });
 
-    const version = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/versions/0.1.0");
-    expect(version.statusCode).toBe(200);
-    expect(version.json().version.distTags).toContain("latest");
-    expect(version.json().version.documentation).toMatchObject({
-      readmePath: "README.md",
-      readmeMarkdown: expect.stringContaining("Demo Plugin"),
-    });
-    expect(version.json().version.verification).toMatchObject({
-      scanStatus: "clean",
-      moderationStatus: "pending",
-    });
+      const version = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/versions/0.1.0");
+      expect(version.statusCode).toBe(200);
+      expect(version.json().version.distTags).toContain("latest");
+      expect(version.json().version.documentation).toMatchObject({
+        readmePath: "README.md",
+        readmeMarkdown: expect.stringContaining("Demo Plugin"),
+      });
+      expect(version.json().version.verification).toMatchObject({
+        scanStatus: "clean",
+        moderationStatus: "pending",
+        signature: {
+          verified: true,
+        },
+      });
 
-    const download = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/download?tag=latest");
-    expect(download.statusCode).toBe(200);
-    expect(download.headers["content-type"]).toContain("application/zip");
-    expect(download.rawPayload.byteLength).toBeGreaterThan(20);
+      const download = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/download?tag=latest");
+      expect(download.statusCode).toBe(200);
+      expect(download.headers["content-type"]).toContain("application/zip");
+      expect(download.rawPayload.byteLength).toBeGreaterThan(20);
 
-    const detail = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin");
-    expect(detail.statusCode).toBe(200);
-    expect(detail.json().package.stats.downloads).toBe(1);
-    await app.close();
+      const detail = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin");
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json().package.stats.downloads).toBe(1);
+    } finally {
+      await app.close();
+      if (previousSigningSecret === undefined) delete process.env.KOVAHUB_PUBLISH_SIGNING_SECRET;
+      else process.env.KOVAHUB_PUBLISH_SIGNING_SECRET = previousSigningSecret;
+      if (previousSigningKeyId === undefined) delete process.env.KOVAHUB_PUBLISH_SIGNING_KEY_ID;
+      else process.env.KOVAHUB_PUBLISH_SIGNING_KEY_ID = previousSigningKeyId;
+    }
   });
 
   it("returns package version history with a single latest tag", async () => {
@@ -1318,6 +1338,49 @@ describe("registry api", () => {
         moderationStatus: "approved",
         scanStatus: "clean",
         riskLevel: "low",
+      });
+
+      const scanned = await app.inject({
+        method: "POST",
+        url: "/api/v1/reviewer/packages/%40openkova%2Fcontext-bridge/scan",
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: {
+          status: "clean",
+          provider: "manual",
+          riskLevel: "low",
+          summary: "Manual hosted scanner result recorded.",
+        },
+      });
+      expect(scanned.statusCode).toBe(200);
+      expect(scanned.json().package.verification).toMatchObject({
+        scanStatus: "clean",
+        scanner: {
+          provider: "manual",
+          status: "clean",
+          checkedAt: expect.any(Number),
+        },
+      });
+
+      const rebuilt = await app.inject({
+        method: "POST",
+        url: "/api/v1/reviewer/packages/%40openkova%2Fcontext-bridge/rebuild",
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: {
+          status: "passed",
+          command: "pnpm build",
+          sourceRepo: "https://github.com/OpenKova/context-bridge",
+          sourceCommit: "abc123",
+        },
+      });
+      expect(rebuilt.statusCode).toBe(200);
+      expect(rebuilt.json().package.verification).toMatchObject({
+        tier: "rebuild-verified",
+        scope: "dependency-graph-aware",
+        rebuild: {
+          status: "passed",
+          command: "pnpm build",
+          sourceCommit: "abc123",
+        },
       });
     } finally {
       if (previousReviewers === undefined) delete process.env.KOVAHUB_REVIEWER_HANDLES;

@@ -138,6 +138,10 @@ function highestSeverity(findings: Finding[]) {
   return null;
 }
 
+function scannerWebhookUrl() {
+  return process.env.KOVAHUB_SCANNER_WEBHOOK_URL?.trim() || undefined;
+}
+
 export function scanPackageArtifact(params: {
   files: SecurityScanFile[];
   packageJson?: JsonRecord | null;
@@ -165,6 +169,7 @@ export function scanPackageArtifact(params: {
 
   const severity = highestSeverity(findings);
   const { sourceRepo, sourceCommit } = sourceMetadata(packageJson);
+  const webhookUrl = scannerWebhookUrl();
   const tier = hasProvenance
     ? "provenance-verified"
     : sourceRepo
@@ -200,6 +205,20 @@ export function scanPackageArtifact(params: {
     sourceCommit,
     hasProvenance,
     scanStatus,
+    scanner: webhookUrl
+      ? {
+          provider: "webhook",
+          status: "queued",
+          url: webhookUrl,
+        }
+      : {
+          provider: "structural",
+          status: scanStatus,
+          checkedAt: Date.now(),
+        },
+    rebuild: {
+      status: "not-run",
+    },
     moderationStatus: params.channel === "official" ? "approved" : "pending",
     riskLevel,
     findings,
