@@ -14,6 +14,7 @@ import { openApiDocument } from "./openapi.js";
 import { preparePublishInputFromArchive } from "./packageInspection.js";
 import type {
   AuthPrincipal,
+  NotificationRecord,
   OrganizationMemberRecord,
   OrganizationRecord,
   PackageCommentRecord,
@@ -72,6 +73,12 @@ const reportListQuerySchema = versionListQuerySchema.extend({
 const reportParamsSchema = z.object({
   id: z.string().min(1),
 });
+const notificationParamsSchema = z.object({
+  id: z.string().min(1),
+});
+const notificationListQuerySchema = versionListQuerySchema.extend({
+  unreadOnly: z.coerce.boolean().optional(),
+});
 const userHandleParamsSchema = z.object({
   handle: z.string().trim().min(1).max(80),
 });
@@ -82,6 +89,9 @@ const reportUpdateSchema = z.object({
   status: z.enum(["open", "reviewed", "dismissed"]),
   resolution: z.string().trim().max(1000).nullable().optional(),
   moderationStatus: z.enum(["pending", "approved", "rejected"]).optional(),
+});
+const reportAssignSchema = z.object({
+  assigneeHandle: z.string().trim().min(1).max(80),
 });
 const packageModerationSchema = z.object({
   moderationStatus: z.enum(["pending", "approved", "rejected"]).optional(),
@@ -254,7 +264,27 @@ function publicPackageReport(report: PackageReportRecord) {
         }
       : null,
     resolvedAt: report.resolvedAt ?? null,
+    assignedTo: report.assignedToId
+      ? {
+          id: report.assignedToId,
+          handle: report.assignedToHandle ?? null,
+        }
+      : null,
+    assignedAt: report.assignedAt ?? null,
     createdAt: report.createdAt,
+  };
+}
+
+function publicNotification(notification: NotificationRecord) {
+  return {
+    id: notification.id,
+    type: notification.type,
+    title: notification.title,
+    body: notification.body ?? null,
+    packageName: notification.packageName ?? null,
+    reportId: notification.reportId ?? null,
+    readAt: notification.readAt ?? null,
+    createdAt: notification.createdAt,
   };
 }
 
@@ -363,6 +393,38 @@ function configuredReviewerHandles() {
 function isReviewer(user: AuthPrincipal) {
   const handles = configuredReviewerHandles();
   return handles.includes(user.handle.toLowerCase()) || handles.includes(`@${user.handle.toLowerCase()}`);
+}
+
+async function notifyUsers(
+  repo: RegistryRepository,
+  users: AuthPrincipal[],
+  input: Omit<NotificationRecord, "id" | "userId" | "createdAt" | "readAt">,
+) {
+  const seen = new Set<string>();
+  for (const user of users) {
+    if (seen.has(user.id)) continue;
+    seen.add(user.id);
+    await repo.createNotification({ ...input, userId: user.id });
+  }
+}
+
+async function notifyReportCreated(repo: RegistryRepository, pkg: PackageRecord, report: PackageReportRecord) {
+  const recipients: AuthPrincipal[] = [];
+  for (const handle of configuredReviewerHandles()) {
+    const reviewer = await repo.findUserByHandle(handle.replace(/^@/, ""));
+    if (reviewer) recipients.push({ id: reviewer.id, handle: reviewer.handle, email: reviewer.email });
+  }
+  if (pkg.ownerHandle) {
+    const owner = await repo.findUserByHandle(pkg.ownerHandle);
+    if (owner) recipients.push({ id: owner.id, handle: owner.handle, email: owner.email });
+  }
+  await notifyUsers(repo, recipients, {
+    type: "package_reported",
+    title: `New report for ${pkg.name}`,
+    body: report.reason,
+    packageName: pkg.name,
+    reportId: report.id,
+  });
 }
 
 async function requireReviewer(request: FastifyRequest, reply: FastifyReply, repo: RegistryRepository) {
@@ -717,6 +779,37 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     return repo.listStarredPackages(user.id, query.data);
   });
 
+  app.get("/api/v1/notifications", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const query = notificationListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid notification list request." };
+    }
+    const page = await repo.listNotifications(user.id, query.data);
+    return {
+      items: page.items.map(publicNotification),
+      nextCursor: page.nextCursor,
+    };
+  });
+
+  app.patch("/api/v1/notifications/:id/read", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = notificationParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid notification id." };
+    }
+    const notification = await repo.markNotificationRead(user.id, params.data.id);
+    if (!notification) {
+      reply.code(404);
+      return { notification: null };
+    }
+    return { notification: publicNotification(notification) };
+  });
+
   app.get("/api/v1/reviewer/reports", async (request, reply) => {
     const reviewer = await requireReviewer(request, reply, repo);
     if (!reviewer) return reply;
@@ -749,6 +842,45 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     if (!report) {
       reply.code(404);
       return { report: null };
+    }
+    await repo.createNotification({
+      userId: report.userId,
+      type: "report_resolved",
+      title: `Report ${report.status}`,
+      body: report.resolution ?? "A reviewer updated your package report.",
+      packageName: report.packageName,
+      reportId: report.id,
+    });
+    return { report: publicPackageReport(report) };
+  });
+
+  app.post("/api/v1/reviewer/reports/:id/assign", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = reportParamsSchema.safeParse(request.params);
+    const body = reportAssignSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid report assignment request."
+          : body.error.issues[0]?.message ?? "Invalid report assignment payload.",
+      };
+    }
+    const report = await repo.assignPackageReport(params.data.id, reviewer, body.data.assigneeHandle);
+    if (!report) {
+      reply.code(404);
+      return { report: null };
+    }
+    if (report.assignedToId) {
+      await repo.createNotification({
+        userId: report.assignedToId,
+        type: "report_assigned",
+        title: `Assigned report for ${report.packageName}`,
+        body: `Assigned by ${reviewer.handle}.`,
+        packageName: report.packageName,
+        reportId: report.id,
+      });
     }
     return { report: publicPackageReport(report) };
   });
@@ -1293,6 +1425,18 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       reply.code(404);
       return { package: null };
     }
+    if (pkg.ownerHandle) {
+      const owner = await repo.findUserByHandle(pkg.ownerHandle);
+      if (owner) {
+        await repo.createNotification({
+          userId: owner.id,
+          type: "package_moderated",
+          title: `Moderation updated for ${pkg.name}`,
+          body: pkg.verification?.summary ?? "A reviewer updated this package's moderation status.",
+          packageName: pkg.name,
+        });
+      }
+    }
     return publicPackageDetail(pkg);
   });
 
@@ -1467,6 +1611,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       reply.code(404);
       return { report: null };
     }
+    await notifyReportCreated(repo, pkg, report);
     reply.code(201);
     return {
       report: publicPackageReport(report),

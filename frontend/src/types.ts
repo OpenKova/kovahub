@@ -146,6 +146,22 @@ export type PackageReport = {
     handle?: string | null;
   } | null;
   resolvedAt?: number | null;
+  assignedTo?: {
+    id: string;
+    handle?: string | null;
+  } | null;
+  assignedAt?: number | null;
+  createdAt: number;
+};
+
+export type NotificationItem = {
+  id: string;
+  type: "package_reported" | "report_assigned" | "report_resolved" | "package_moderated";
+  title: string;
+  body?: string | null;
+  packageName?: string | null;
+  reportId?: string | null;
+  readAt?: number | null;
   createdAt: number;
 };
 

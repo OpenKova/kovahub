@@ -40,6 +40,8 @@ import {
   type RegistryRepository,
   type SearchPackagesOptions,
   type UserAccount,
+  type NotificationRecord,
+  type ListNotificationsOptions,
 } from "./repository.js";
 
 type PackageRow = QueryResultRow & {
@@ -160,6 +162,21 @@ type PackageReportRow = QueryResultRow & {
   resolved_by_id: string | null;
   resolved_by_handle: string | null;
   resolved_at: Date | null;
+  assigned_to_id: string | null;
+  assigned_to_handle: string | null;
+  assigned_at: Date | null;
+  created_at: Date;
+};
+
+type NotificationRow = QueryResultRow & {
+  id: string;
+  user_id: string;
+  type: NotificationRecord["type"];
+  title: string;
+  body: string | null;
+  package_name: string | null;
+  report_id: string | null;
+  read_at: Date | null;
   created_at: Date;
 };
 
@@ -354,6 +371,23 @@ function rowToPackageReport(row: PackageReportRow): PackageReportRecord {
     resolvedById: row.resolved_by_id,
     resolvedByHandle: row.resolved_by_handle,
     resolvedAt: row.resolved_at ? timeMs(row.resolved_at) : null,
+    assignedToId: row.assigned_to_id,
+    assignedToHandle: row.assigned_to_handle,
+    assignedAt: row.assigned_at ? timeMs(row.assigned_at) : null,
+    createdAt: timeMs(row.created_at),
+  };
+}
+
+function rowToNotification(row: NotificationRow): NotificationRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    title: row.title,
+    body: row.body,
+    packageName: row.package_name,
+    reportId: row.report_id,
+    readAt: row.read_at ? timeMs(row.read_at) : null,
     createdAt: timeMs(row.created_at),
   };
 }
@@ -1727,6 +1761,9 @@ export class PostgresRegistryRepository implements RegistryRepository {
             resolved_by_id,
             null::text as resolved_by_handle,
             resolved_at,
+            assigned_to_id,
+            null::text as assigned_to_handle,
+            assigned_at,
             created_at
         `,
         [normalizeKey(name), user.id, reason],
@@ -1781,6 +1818,66 @@ export class PostgresRegistryRepository implements RegistryRepository {
     }
   }
 
+  async createNotification(input: Omit<NotificationRecord, "id" | "createdAt" | "readAt">) {
+    const result = await this.pool.query<NotificationRow>(
+      `
+        insert into notifications (user_id, type, title, body, package_name, report_id)
+        values ($1, $2, $3, $4, $5, $6)
+        returning id, user_id, type, title, body, package_name, report_id, read_at, created_at
+      `,
+      [
+        input.userId,
+        input.type,
+        input.title,
+        input.body ?? null,
+        input.packageName ?? null,
+        input.reportId ?? null,
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Notification creation failed.");
+    return rowToNotification(row);
+  }
+
+  async listNotifications(userId: string, options: ListNotificationsOptions = {}) {
+    const limit = clampLimit(options.limit, 50);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const params: unknown[] = [userId];
+    const where = ["user_id = $1"];
+    if (options.unreadOnly) where.push("read_at is null");
+    params.push(limit + 1, offset);
+    const result = await this.pool.query<NotificationRow>(
+      `
+        select id, user_id, type, title, body, package_name, report_id, read_at, created_at
+        from notifications
+        where ${where.join(" and ")}
+        order by created_at desc
+        limit $${params.length - 1}
+        offset $${params.length}
+      `,
+      params,
+    );
+    const rows = result.rows.slice(0, limit);
+    return {
+      items: rows.map(rowToNotification),
+      nextCursor: result.rows.length > limit ? String(offset + limit) : null,
+    };
+  }
+
+  async markNotificationRead(userId: string, notificationId: string) {
+    const result = await this.pool.query<NotificationRow>(
+      `
+        update notifications
+        set read_at = coalesce(read_at, now())
+        where id = $1 and user_id = $2
+        returning id, user_id, type, title, body, package_name, report_id, read_at, created_at
+      `,
+      [notificationId, userId],
+    );
+    const row = result.rows[0];
+    return row ? rowToNotification(row) : null;
+  }
+
   async listPackageReports(options: ListPackageReportsOptions = {}) {
     const limit = clampLimit(options.limit, 50);
     const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
@@ -1801,11 +1898,15 @@ export class PostgresRegistryRepository implements RegistryRepository {
           pr.resolved_by_id,
           ru.handle as resolved_by_handle,
           pr.resolved_at,
+          pr.assigned_to_id,
+          au.handle as assigned_to_handle,
+          pr.assigned_at,
           pr.created_at
         from package_reports pr
         join packages p on p.id = pr.package_id
         join users u on u.id = pr.user_id
         left join users ru on ru.id = pr.resolved_by_id
+        left join users au on au.id = pr.assigned_to_id
         ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
         order by pr.created_at desc
         limit $${params.length - 1}
@@ -1845,6 +1946,9 @@ export class PostgresRegistryRepository implements RegistryRepository {
             pr.resolved_by_id,
             (select handle from users where id = pr.resolved_by_id) as resolved_by_handle,
             pr.resolved_at,
+            pr.assigned_to_id,
+            (select handle from users where id = pr.assigned_to_id) as assigned_to_handle,
+            pr.assigned_at,
             pr.created_at
         `,
         [reportId, input.status, input.resolution ?? null, reviewer.id],
@@ -1877,6 +1981,40 @@ export class PostgresRegistryRepository implements RegistryRepository {
     } finally {
       client.release();
     }
+  }
+
+  async assignPackageReport(reportId: string, _reviewer: AuthPrincipal, assigneeHandle: string) {
+    const result = await this.pool.query<PackageReportRow>(
+      `
+        update package_reports pr
+        set
+          assigned_to_id = u.id,
+          assigned_at = now()
+        from users u, packages p, users reporter
+        where pr.id = $1
+          and u.handle = $2
+          and p.id = pr.package_id
+          and reporter.id = pr.user_id
+        returning
+          pr.id,
+          p.name as package_name,
+          pr.user_id,
+          reporter.handle as user_handle,
+          pr.reason,
+          pr.status,
+          pr.resolution,
+          pr.resolved_by_id,
+          (select handle from users where id = pr.resolved_by_id) as resolved_by_handle,
+          pr.resolved_at,
+          pr.assigned_to_id,
+          u.handle as assigned_to_handle,
+          pr.assigned_at,
+          pr.created_at
+      `,
+      [reportId, normalizePublisherHandle(assigneeHandle)],
+    );
+    const row = result.rows[0];
+    return row ? rowToPackageReport(row) : null;
   }
 
   async updatePackageModeration(name: string, _reviewer: AuthPrincipal, input: PackageModerationInput) {

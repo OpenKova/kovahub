@@ -125,6 +125,21 @@ export type PackageReportRecord = {
   resolvedById?: string | null;
   resolvedByHandle?: string | null;
   resolvedAt?: number | null;
+  assignedToId?: string | null;
+  assignedToHandle?: string | null;
+  assignedAt?: number | null;
+  createdAt: number;
+};
+
+export type NotificationRecord = {
+  id: string;
+  userId: string;
+  type: "package_reported" | "report_assigned" | "report_resolved" | "package_moderated";
+  title: string;
+  body?: string | null;
+  packageName?: string | null;
+  reportId?: string | null;
+  readAt?: number | null;
   createdAt: number;
 };
 
@@ -151,6 +166,12 @@ export type SearchPackagesOptions = {
 
 export type ListPackageReportsOptions = {
   status?: PackageReportRecord["status"];
+  limit?: number;
+  cursor?: string;
+};
+
+export type ListNotificationsOptions = {
+  unreadOnly?: boolean;
   limit?: number;
   cursor?: string;
 };
@@ -227,7 +248,11 @@ export type RegistryRepository = {
   reportPackage(name: string, user: AuthPrincipal, reason: string): Promise<PackageReportRecord | null>;
   listPackageReports(options?: ListPackageReportsOptions): Promise<{ items: PackageReportRecord[]; nextCursor: string | null }>;
   updatePackageReport(reportId: string, reviewer: AuthPrincipal, input: PackageReportUpdateInput): Promise<PackageReportRecord | null>;
+  assignPackageReport(reportId: string, reviewer: AuthPrincipal, assigneeHandle: string): Promise<PackageReportRecord | null>;
   updatePackageModeration(name: string, reviewer: AuthPrincipal, input: PackageModerationInput): Promise<PackageRecord | null>;
+  createNotification(input: Omit<NotificationRecord, "id" | "createdAt" | "readAt">): Promise<NotificationRecord>;
+  listNotifications(userId: string, options?: ListNotificationsOptions): Promise<{ items: NotificationRecord[]; nextCursor: string | null }>;
+  markNotificationRead(userId: string, notificationId: string): Promise<NotificationRecord | null>;
 };
 
 export type ArchiveFileInput = {
@@ -536,6 +561,7 @@ export class InMemoryRegistryRepository implements RegistryRepository {
   private readonly packageStars = new Map<string, { packageName: string; userId: string; createdAt: number }>();
   private readonly packageComments = new Map<string, PackageCommentRecord>();
   private readonly packageReports = new Map<string, PackageReportRecord>();
+  private readonly notifications = new Map<string, NotificationRecord>();
 
   async createUser(input: {
     handle: string;
@@ -1220,6 +1246,9 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       resolvedById: null,
       resolvedByHandle: null,
       resolvedAt: null,
+      assignedToId: null,
+      assignedToHandle: null,
+      assignedAt: null,
       createdAt: now(),
     };
     this.packageReports.set(report.id, report);
@@ -1246,6 +1275,44 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       pkg.updatedAt = now();
     }
     return report;
+  }
+
+  async createNotification(input: Omit<NotificationRecord, "id" | "createdAt" | "readAt">) {
+    const record: NotificationRecord = {
+      id: newId("note"),
+      userId: input.userId,
+      type: input.type,
+      title: input.title,
+      body: input.body ?? null,
+      packageName: input.packageName ?? null,
+      reportId: input.reportId ?? null,
+      readAt: null,
+      createdAt: now(),
+    };
+    this.notifications.set(record.id, record);
+    return record;
+  }
+
+  async listNotifications(userId: string, options: ListNotificationsOptions = {}) {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const filtered = [...this.notifications.values()]
+      .filter((notification) => notification.userId === userId)
+      .filter((notification) => (options.unreadOnly ? !notification.readAt : true))
+      .sort((left, right) => right.createdAt - left.createdAt);
+    const page = filtered.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      items: page,
+      nextCursor: nextOffset < filtered.length ? String(nextOffset) : null,
+    };
+  }
+
+  async markNotificationRead(userId: string, notificationId: string) {
+    const notification = this.notifications.get(notificationId);
+    if (!notification || notification.userId !== userId) return null;
+    notification.readAt = notification.readAt ?? now();
+    return notification;
   }
 
   async listPackageReports(options: ListPackageReportsOptions = {}) {
@@ -1281,6 +1348,16 @@ export class InMemoryRegistryRepository implements RegistryRepository {
         pkg.updatedAt = now();
       }
     }
+    return report;
+  }
+
+  async assignPackageReport(reportId: string, _reviewer: AuthPrincipal, assigneeHandle: string) {
+    const report = this.packageReports.get(reportId);
+    const assignee = await this.findUserByHandle(assigneeHandle);
+    if (!report || !assignee) return null;
+    report.assignedToId = assignee.id;
+    report.assignedToHandle = assignee.handle;
+    report.assignedAt = now();
     return report;
   }
 

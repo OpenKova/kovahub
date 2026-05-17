@@ -1331,6 +1331,85 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("supports reviewer report assignments and notifications", async () => {
+    const previousReviewers = process.env.KOVAHUB_REVIEWER_HANDLES;
+    process.env.KOVAHUB_REVIEWER_HANDLES = "tester";
+    const app = await buildServerWithPackageFixtures();
+    const jwt = await signInWithGitHub(app);
+    const packagePath = "/api/v1/packages/%40openkova%2Fcontext-bridge";
+    try {
+      const report = await app.inject({
+        method: "POST",
+        url: `${packagePath}/report`,
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { reason: "Reviewer assignment smoke test." },
+      });
+      expect(report.statusCode).toBe(201);
+      const reportId = report.json().report.id;
+
+      const notifications = await app.inject({
+        method: "GET",
+        url: "/api/v1/notifications",
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(notifications.statusCode).toBe(200);
+      expect(notifications.json().items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "package_reported",
+            reportId,
+            packageName: "@openkova/context-bridge",
+            readAt: null,
+          }),
+        ]),
+      );
+
+      const assigned = await app.inject({
+        method: "POST",
+        url: `/api/v1/reviewer/reports/${reportId}/assign`,
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { assigneeHandle: "tester" },
+      });
+      expect(assigned.statusCode).toBe(200);
+      expect(assigned.json().report).toMatchObject({
+        id: reportId,
+        assignedTo: { handle: "tester" },
+        assignedAt: expect.any(Number),
+      });
+
+      const afterAssign = await app.inject({
+        method: "GET",
+        url: "/api/v1/notifications?unreadOnly=true",
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(afterAssign.statusCode).toBe(200);
+      expect(afterAssign.json().items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "report_assigned",
+            reportId,
+          }),
+        ]),
+      );
+
+      const notificationId = afterAssign.json().items[0].id;
+      const read = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/notifications/${notificationId}/read`,
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(read.statusCode).toBe(200);
+      expect(read.json().notification).toMatchObject({
+        id: notificationId,
+        readAt: expect.any(Number),
+      });
+    } finally {
+      await app.close();
+      if (previousReviewers === undefined) delete process.env.KOVAHUB_REVIEWER_HANDLES;
+      else process.env.KOVAHUB_REVIEWER_HANDLES = previousReviewers;
+    }
+  });
+
   it("supports reviewer bans, report auto-hide, and package hard-delete", async () => {
     const previousReviewers = process.env.KOVAHUB_REVIEWER_HANDLES;
     const previousThreshold = process.env.KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD;

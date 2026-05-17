@@ -1,6 +1,7 @@
 import {
   ArrowDownToLine,
   ArrowRight,
+  Bell,
   BookOpen,
   Boxes,
   CheckCircle2,
@@ -36,12 +37,14 @@ import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   approveDeviceLogin,
+  assignReviewerReport,
   clearToken,
   createOrganization,
   createApiToken,
   deletePackage,
   fetchMyOrganizations,
   fetchMe,
+  fetchNotifications,
   fetchOwnerPackages,
   fetchPackageDetail,
   fetchPackageComments,
@@ -66,6 +69,7 @@ import {
   revokeApiToken,
   restorePackage,
   listApiTokens,
+  markNotificationRead,
   storeToken,
   togglePackageStar,
   transferPackage,
@@ -79,6 +83,7 @@ import { kovaRoboLogo } from "./brandAssets";
 import type {
   AuthUser,
   ApiTokenSummary,
+  NotificationItem,
   Organization,
   PackageComment,
   PackageDetail,
@@ -2182,6 +2187,76 @@ function OwnerPackageCard({
   );
 }
 
+function NotificationsPanel() {
+  const [items, setItems] = useState<NotificationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchNotifications({ limit: 20 })
+      .then((page) => {
+        if (active) setItems(page.items);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load notifications.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function markRead(notification: NotificationItem) {
+    setError(null);
+    try {
+      const result = await markNotificationRead(notification.id);
+      if (result.notification) {
+        setItems((current) =>
+          current.map((item) => (item.id === notification.id ? result.notification ?? item : item)),
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Notification update failed.");
+    }
+  }
+
+  return (
+    <section className="content-section notifications-panel">
+      <div className="content-section-head">
+        <h2><Bell size={17} aria-hidden="true" /> Notifications</h2>
+        <span>{items.filter((item) => !item.readAt).length} unread</span>
+      </div>
+      {loading ? <p className="content-muted">Loading notifications...</p> : null}
+      {error ? <p className="form-error">{error}</p> : null}
+      {!loading && items.length === 0 ? <p className="content-muted">No notifications yet.</p> : null}
+      <div className="notification-list">
+        {items.map((notification) => (
+          <article className={notification.readAt ? "notification-row is-read" : "notification-row"} key={notification.id}>
+            <div>
+              <strong>{notification.title}</strong>
+              {notification.body ? <p>{notification.body}</p> : null}
+              <small>{formatDate(notification.createdAt)}</small>
+            </div>
+            <div className="notification-actions">
+              {notification.packageName ? <Link to={packageRoute(notification.packageName)}>Open</Link> : null}
+              {!notification.readAt ? (
+                <button type="button" onClick={() => void markRead(notification)}>
+                  Mark read
+                </button>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ModerationPanel() {
   const [reports, setReports] = useState<PackageReport[]>([]);
   const [available, setAvailable] = useState(true);
@@ -2286,6 +2361,24 @@ function ModerationPanel() {
     }
   }
 
+  async function assignReport(report: PackageReport) {
+    const assigneeHandle = window.prompt("Assign to reviewer handle", report.assignedTo?.handle ?? "");
+    if (!assigneeHandle?.trim()) return;
+    setStatus(null);
+    setError(null);
+    try {
+      const result = await assignReviewerReport(report.id, assigneeHandle.trim());
+      if (result.report) {
+        setReports((current) =>
+          current.map((candidate) => (candidate.id === result.report?.id ? result.report : candidate)),
+        );
+      }
+      setStatus(`Report assigned to @${assigneeHandle.trim()}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Report assignment failed.");
+    }
+  }
+
   if (!available) return null;
 
   return (
@@ -2306,9 +2399,13 @@ function ModerationPanel() {
               <p>{report.reason}</p>
               <small>
                 Reported by @{report.user.handle} - {formatDate(report.createdAt)}
+                {report.assignedTo ? ` - Assigned to @${report.assignedTo.handle ?? "reviewer"}` : ""}
               </small>
             </div>
             <div className="moderation-actions">
+              <button type="button" onClick={() => void assignReport(report)}>
+                Assign
+              </button>
               <button type="button" onClick={() => void closeReport(report, "approved")}>
                 Approve
               </button>
@@ -3247,6 +3344,8 @@ function DashboardPage({ theme }: { theme: ThemeSettings }) {
         </article>
         <ApiTokenPanel user={user} />
       </section>
+
+      <NotificationsPanel />
 
       <OrganizationPanel />
 

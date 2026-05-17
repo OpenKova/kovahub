@@ -49,8 +49,23 @@ export const openApiDocument = {
       get: { summary: "List API tokens", responses: { "200": { description: "API tokens" } } },
       post: { summary: "Create API token", responses: { "201": { description: "Created API token" } } },
     },
+    "/api/v1/notifications": {
+      get: { summary: "List authenticated user notifications", responses: { "200": { description: "Notification page" } } },
+    },
+    "/api/v1/notifications/{id}/read": {
+      patch: { summary: "Mark a notification as read", responses: { "200": { description: "Updated notification" } } },
+    },
     "/api/v1/import/github": {
       post: { summary: "Import and publish from GitHub", responses: { "201": { description: "Published package" } } },
+    },
+    "/api/v1/reviewer/reports": {
+      get: { summary: "List package reports for reviewers", responses: { "200": { description: "Report page" } } },
+    },
+    "/api/v1/reviewer/reports/{id}": {
+      patch: { summary: "Resolve or dismiss a package report", responses: { "200": { description: "Updated report" } } },
+    },
+    "/api/v1/reviewer/reports/{id}/assign": {
+      post: { summary: "Assign a package report to a reviewer", responses: { "200": { description: "Assigned report" } } },
     },
     "/api/v1/reviewer/users/{handle}/ban": {
       post: { summary: "Ban a user", responses: { "200": { description: "Banned user" } } },

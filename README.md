@@ -118,6 +118,7 @@ Implemented in the scaffold:
 - Package comments and authenticated package reports.
 - Reviewer moderation queue for reported packages.
 - Reviewer moderation hardening: user bans, report-threshold auto-hide, package hard-delete, and duplicate package merge.
+- Reviewer assignment workflow and authenticated notification feed for reports/moderation events.
 - Production ops basics: health/readiness endpoints, optional protected metrics, built-in rate limits, and backup export retention controls.
 - Unified search page with all/skills/plugins filters.
 - Audit page for security scan and moderation signals.
@@ -219,10 +220,13 @@ Auth and publish routes:
 - `POST /api/v1/organizations/:handle/members`
 - `GET /api/v1/reviewer/reports`
 - `PATCH /api/v1/reviewer/reports/:id`
+- `POST /api/v1/reviewer/reports/:id/assign`
 - `POST /api/v1/reviewer/users/:handle/ban`
 - `DELETE /api/v1/reviewer/users/:handle/ban`
 - `DELETE /api/v1/reviewer/packages/:name`
 - `POST /api/v1/reviewer/packages/:name/merge`
+- `GET /api/v1/notifications`
+- `PATCH /api/v1/notifications/:id/read`
 - `POST /api/v1/import/github/preview`
 - `POST /api/v1/import/github`
 - `POST /api/v1/packages`
@@ -288,7 +292,7 @@ pnpm --filter @kovahub/cli dev list
 KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth/install flows, import/export, moderation, documentation rendering, and compatibility surfaces. Remaining hardening work is:
 
 1. Add hosted scanner integrations, signed publish metadata, and rebuild verification beyond the built-in structural scanner.
-2. Add semantic/vector search, notifications, and reviewer assignment workflows.
+2. Add semantic/vector search.
 3. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
 4. Run exact native Kova client integration tests against the deployed registry URL.
 

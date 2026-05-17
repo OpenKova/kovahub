@@ -1,6 +1,7 @@
 import type {
   AuthUser,
   ApiTokenSummary,
+  NotificationItem,
   PackageComment,
   PackageDetail,
   PackageFamily,
@@ -106,6 +107,23 @@ export async function fetchStarredPackages(params: { cursor?: string | null; lim
   return request<{ items: PackageListItem[]; nextCursor: string | null }>(`/api/v1/stars?${query.toString()}`);
 }
 
+export async function fetchNotifications(params: { cursor?: string | null; limit?: number; unreadOnly?: boolean } = {}) {
+  const query = new URLSearchParams();
+  if (params.cursor) query.set("cursor", params.cursor);
+  if (params.unreadOnly !== undefined) query.set("unreadOnly", String(params.unreadOnly));
+  query.set("limit", String(params.limit ?? 50));
+  return request<{ items: NotificationItem[]; nextCursor: string | null }>(
+    `/api/v1/notifications?${query.toString()}`,
+  );
+}
+
+export async function markNotificationRead(id: string) {
+  return request<{ notification: NotificationItem | null }>(
+    `/api/v1/notifications/${encodeURIComponent(id)}/read`,
+    { method: "PATCH" },
+  );
+}
+
 export async function fetchOwnerPackages(params: { cursor?: string | null; limit?: number } = {}) {
   const query = new URLSearchParams();
   if (params.cursor) query.set("cursor", params.cursor);
@@ -192,6 +210,16 @@ export async function updateReviewerReport(
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export async function assignReviewerReport(id: string, assigneeHandle: string) {
+  return request<{ report: PackageReport | null }>(
+    `/api/v1/reviewer/reports/${encodeURIComponent(id)}/assign`,
+    {
+      method: "POST",
+      body: JSON.stringify({ assigneeHandle }),
+    },
+  );
 }
 
 export async function updatePackageModeration(
