@@ -114,8 +114,10 @@ Implemented in the scaffold:
 - Download, install, and star counters exposed in package stats.
 - Package detail page with compatibility, capability signals, stats, and version history.
 - Package detail tabs for overview, versions, compatibility, files, and discussion.
+- README/SKILL documentation extraction from package archives with safe React rendering on package detail pages.
 - Package comments and authenticated package reports.
 - Reviewer moderation queue for reported packages.
+- Reviewer moderation hardening: user bans, report-threshold auto-hide, package hard-delete, and duplicate package merge.
 - Unified search page with all/skills/plugins filters.
 - Audit page for security scan and moderation signals.
 - Owner package settings for metadata edits, rename, transfer, restore, delete, and yanking.
@@ -125,6 +127,7 @@ Implemented in the scaffold:
 - Latest version tag behavior.
 - ZIP archive download endpoints.
 - Structural archive security scan signals, source/provenance metadata, and moderation status in package verification metadata.
+- First-party CLI login, publish, install, update, sync, pin, unpin, and local list workflows.
 - Frontend compose publishing, archive ZIP publishing, and API token management.
 - OpenAPI document at `/openapi.json`, baseline security headers, and GitHub Actions CI.
 - Plugin compatibility metadata:
@@ -215,6 +218,10 @@ Auth and publish routes:
 - `POST /api/v1/organizations/:handle/members`
 - `GET /api/v1/reviewer/reports`
 - `PATCH /api/v1/reviewer/reports/:id`
+- `POST /api/v1/reviewer/users/:handle/ban`
+- `DELETE /api/v1/reviewer/users/:handle/ban`
+- `DELETE /api/v1/reviewer/packages/:name`
+- `POST /api/v1/reviewer/packages/:name/merge`
 - `POST /api/v1/import/github/preview`
 - `POST /api/v1/import/github`
 - `POST /api/v1/packages`
@@ -255,6 +262,7 @@ For Kova plugin archives, `package.json` must declare:
 - `kova.build.kovaVersion`
 
 Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MAX_ARCHIVE_ENTRIES`, and `KOVAHUB_MAX_EXTRACTED_BYTES`.
+Rendered README/SKILL documentation is capped by `KOVAHUB_MAX_DOCUMENTATION_BYTES`. Report auto-hide defaults to 3 open reports and can be changed with `KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD`.
 
 ## CLI
 
@@ -263,18 +271,24 @@ The first-party CLI package lives in `cli/` and uses the device-code flow:
 ```bash
 pnpm --filter @kovahub/cli dev login --registry http://localhost:8787
 pnpm --filter @kovahub/cli dev whoami --registry http://localhost:8787
-pnpm --filter @kovahub/cli dev publish ./my-package.zip --registry http://localhost:8787
+pnpm --filter @kovahub/cli dev publish ./package-publish.json --archive ./my-package.zip --registry http://localhost:8787
+pnpm --filter @kovahub/cli dev install @publisher/package --registry http://localhost:8787
+pnpm --filter @kovahub/cli dev update @publisher/package --registry http://localhost:8787
+pnpm --filter @kovahub/cli dev sync --registry http://localhost:8787
+pnpm --filter @kovahub/cli dev pin @publisher/package 1.2.3
+pnpm --filter @kovahub/cli dev unpin @publisher/package
+pnpm --filter @kovahub/cli dev list
 ```
 
 ## Remaining Hardening
 
-KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth, import/export, and compatibility surfaces. Remaining hardening work is:
+KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth/install flows, import/export, moderation, documentation rendering, and compatibility surfaces. Remaining hardening work is:
 
-1. Replace placeholder security status with real scanner integrations, provenance checks, and signed publish metadata.
-2. Add richer package README rendering from archive contents with sanitization.
-3. Add semantic/vector search, notifications, and reviewer assignment workflows.
-4. Add production rate limits, abuse controls, observability, and backup retention policies.
-5. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
+1. Add hosted scanner integrations, signed publish metadata, and rebuild verification beyond the built-in structural scanner.
+2. Add semantic/vector search, notifications, and reviewer assignment workflows.
+3. Add production rate limits, observability dashboards, and backup retention policies.
+4. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
+5. Run exact native Kova client integration tests against the deployed registry URL.
 
 ## References
 
