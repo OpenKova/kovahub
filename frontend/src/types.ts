@@ -41,6 +41,13 @@ export type PackageFile = {
   contentType?: string;
 };
 
+export type PackageDocumentation = {
+  readmePath?: string;
+  readmeMarkdown?: string;
+  skillPath?: string;
+  skillMarkdown?: string;
+};
+
 export type PackageStats = {
   downloads: number;
   installs: number;
@@ -60,6 +67,7 @@ export type PackageVersionSummary = {
   compatibility?: PackageCompatibility | null;
   capabilities?: PackageCapabilities | null;
   verification?: PackageVerification | null;
+  documentation?: PackageDocumentation | null;
 };
 
 export type PackageListItem = {

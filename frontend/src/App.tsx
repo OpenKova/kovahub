@@ -346,6 +346,111 @@ function formatStatus(value?: string | null) {
   return value ? value.replace(/-/g, " ") : "unknown";
 }
 
+type MarkdownBlock =
+  | { kind: "heading"; level: 1 | 2 | 3; text: string }
+  | { kind: "paragraph"; text: string }
+  | { kind: "list"; items: string[] }
+  | { kind: "code"; text: string };
+
+function parseMarkdownBlocks(markdown: string) {
+  const blocks: MarkdownBlock[] = [];
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  let paragraph: string[] = [];
+  let list: string[] = [];
+  let code: string[] | null = null;
+
+  function flushParagraph() {
+    if (paragraph.length > 0) {
+      blocks.push({ kind: "paragraph", text: paragraph.join(" ") });
+      paragraph = [];
+    }
+  }
+
+  function flushList() {
+    if (list.length > 0) {
+      blocks.push({ kind: "list", items: list });
+      list = [];
+    }
+  }
+
+  for (const line of lines) {
+    if (line.startsWith("```")) {
+      if (code) {
+        blocks.push({ kind: "code", text: code.join("\n") });
+        code = null;
+      } else {
+        flushParagraph();
+        flushList();
+        code = [];
+      }
+      continue;
+    }
+    if (code) {
+      code.push(line);
+      continue;
+    }
+
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      const marker = heading[1] ?? "#";
+      const text = heading[2] ?? "";
+      blocks.push({ kind: "heading", level: marker.length as 1 | 2 | 3, text });
+      continue;
+    }
+
+    const listItem = /^[-*]\s+(.+)$/.exec(trimmed);
+    if (listItem) {
+      flushParagraph();
+      list.push(listItem[1] ?? "");
+      continue;
+    }
+
+    flushList();
+    paragraph.push(trimmed);
+  }
+
+  flushParagraph();
+  flushList();
+  if (code) blocks.push({ kind: "code", text: code.join("\n") });
+  return blocks;
+}
+
+function MarkdownDocument({ markdown }: { markdown: string }) {
+  const blocks = useMemo(() => parseMarkdownBlocks(markdown), [markdown]);
+  return (
+    <div className="markdown-doc">
+      {blocks.map((block, index) => {
+        const key = `${block.kind}-${index}`;
+        if (block.kind === "heading") {
+          if (block.level === 1) return <h3 key={key}>{block.text}</h3>;
+          if (block.level === 2) return <h4 key={key}>{block.text}</h4>;
+          return <h5 key={key}>{block.text}</h5>;
+        }
+        if (block.kind === "list") {
+          return (
+            <ul key={key}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`${key}-${itemIndex}`}>{item}</li>
+              ))}
+            </ul>
+          );
+        }
+        if (block.kind === "code") return <pre key={key}>{block.text}</pre>;
+        return <p key={key}>{block.text}</p>;
+      })}
+    </div>
+  );
+}
+
 function reviewLabel(item: Pick<PackageListItem, "moderationStatus">) {
   if (!item.moderationStatus || item.moderationStatus === "approved") return null;
   return item.moderationStatus === "pending" ? "Pending review" : "Review rejected";
@@ -542,6 +647,9 @@ function DetailPanel({
   const topics = topicsFor(pkg);
   const versions = pkg.versions ?? [];
   const latestVersion = versions[0] ?? null;
+  const documentation = latestVersion?.documentation ?? null;
+  const documentationMarkdown = documentation?.readmeMarkdown ?? documentation?.skillMarkdown;
+  const documentationPath = documentation?.readmeMarkdown ? documentation.readmePath : documentation?.skillPath;
   const stats = localStats ?? pkg.stats;
   const returnTo = typeof window === "undefined" ? packageRoute(pkg.name) : `${window.location.pathname}${window.location.search}`;
 
@@ -684,6 +792,17 @@ function DetailPanel({
               <InfoCell label="risk" value={formatStatus(verification?.riskLevel)} />
             </div>
           </div>
+
+          {documentationMarkdown ? (
+            <div className="info-section">
+              <h2>
+                <BookOpen size={17} aria-hidden="true" />
+                Package Docs
+              </h2>
+              {documentationPath ? <p className="content-muted">{documentationPath}</p> : null}
+              <MarkdownDocument markdown={documentationMarkdown} />
+            </div>
+          ) : null}
         </div>
       ) : null}
 

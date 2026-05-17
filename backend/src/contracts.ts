@@ -52,6 +52,13 @@ export type PackageFile = {
   contentType?: string;
 };
 
+export type PackageDocumentation = {
+  readmePath?: string;
+  readmeMarkdown?: string;
+  skillPath?: string;
+  skillMarkdown?: string;
+};
+
 export type PackageStats = {
   downloads: number;
   installs: number;
@@ -93,6 +100,7 @@ export type PackageVersionRecord = {
   compatibility?: PackageCompatibility | null;
   capabilities?: PackageCapabilitySummary | null;
   verification?: PackageVerificationSummary | null;
+  documentation?: PackageDocumentation | null;
   archive: Buffer;
 };
 
@@ -177,6 +185,7 @@ export type PublishPackageInput = z.infer<typeof publishPackageSchema>;
 export type PreparedPublishPackageInput = PublishPackageInput & {
   archiveBuffer?: Buffer;
   archiveFiles?: PackageFile[];
+  documentation?: PackageDocumentation | null;
 };
 
 export type PackageSettingsInput = {

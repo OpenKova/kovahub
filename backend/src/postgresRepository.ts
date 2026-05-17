@@ -73,6 +73,7 @@ type PackageVersionRow = QueryResultRow & {
   compatibility: PackageCompatibility | null;
   capabilities: PackageCapabilitySummary | null;
   verification: PackageVerificationSummary | null;
+  documentation: PackageVersionRecord["documentation"];
   yanked_at: Date | null;
   yank_message: string | null;
   created_at: Date;
@@ -395,6 +396,7 @@ function rowToVersion(row: PackageVersionRow, archive: Buffer = Buffer.alloc(0))
     compatibility: row.compatibility,
     capabilities: row.capabilities,
     verification: row.verification,
+    documentation: row.documentation ?? null,
     archive,
   };
 }
@@ -1858,6 +1860,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
           pv.compatibility,
           pv.capabilities,
           pv.verification,
+          pv.documentation,
           pv.yanked_at,
           pv.yank_message,
           pv.created_at,
@@ -1907,6 +1910,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
           pv.compatibility,
           pv.capabilities,
           pv.verification,
+          pv.documentation,
           pv.yanked_at,
           pv.yank_message,
           pv.created_at,
@@ -1968,9 +1972,10 @@ export class PostgresRegistryRepository implements RegistryRepository {
           compatibility,
           capabilities,
           verification,
+          documentation,
           created_at
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         returning id
       `,
       [
@@ -1983,6 +1988,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
         version.compatibility ?? null,
         version.capabilities ?? null,
         version.verification ?? null,
+        version.documentation ?? null,
         new Date(version.createdAt),
       ],
     );

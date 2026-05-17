@@ -158,6 +158,7 @@ function publicVersionSummary(version: PackageVersionRecord) {
     compatibility: version.compatibility ?? null,
     capabilities: version.capabilities ?? null,
     verification: version.verification ?? null,
+    documentation: version.documentation ?? null,
     sha256hash: version.sha256hash,
   };
 }

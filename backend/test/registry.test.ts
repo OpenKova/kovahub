@@ -313,6 +313,10 @@ describe("registry api", () => {
       scanStatus: "pending",
       moderationStatus: "approved",
     });
+    expect(detail.json().package.versions[0].documentation).toMatchObject({
+      readmePath: "README.md",
+      readmeMarkdown: expect.stringContaining("Context Bridge"),
+    });
 
     const topicList = await app.inject("/api/v1/packages?tag=context");
     expect(topicList.statusCode).toBe(200);
@@ -453,6 +457,11 @@ describe("registry api", () => {
             content: "{\"name\":\"@tester/demo-plugin\",\"version\":\"0.1.0\"}\n",
             contentType: "application/json",
           },
+          {
+            path: "README.md",
+            content: "# Demo Plugin\n\nDemo plugin docs.\n",
+            contentType: "text/markdown",
+          },
         ],
       },
     });
@@ -472,6 +481,10 @@ describe("registry api", () => {
     const version = await app.inject("/api/v1/packages/%40tester%2Fdemo-plugin/versions/0.1.0");
     expect(version.statusCode).toBe(200);
     expect(version.json().version.distTags).toContain("latest");
+    expect(version.json().version.documentation).toMatchObject({
+      readmePath: "README.md",
+      readmeMarkdown: expect.stringContaining("Demo Plugin"),
+    });
     expect(version.json().version.verification).toMatchObject({
       scanStatus: "pending",
       moderationStatus: "pending",

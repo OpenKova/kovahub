@@ -6,6 +6,7 @@ import {
   type PackageCapabilitySummary,
   type PackageChannel,
   type PackageCompatibility,
+  type PackageDocumentation,
   type PackageFamily,
   type PackageFile,
   type PackageListItem,
@@ -260,6 +261,29 @@ function fileBytes(input: ArchiveFileInput) {
   return Buffer.from(input.content ?? "", "utf8");
 }
 
+function markdownContentFor(file: ArchiveFileInput) {
+  const isMarkdown =
+    file.contentType === "text/markdown" ||
+    file.path.toLowerCase().endsWith(".md") ||
+    file.path.toLowerCase().endsWith(".markdown");
+  if (!isMarkdown) return undefined;
+  if (file.content !== undefined) return file.content;
+  if (file.contentBase64 !== undefined) return fileBytes(file).toString("utf8");
+  return undefined;
+}
+
+function documentationFromFiles(files: ArchiveFileInput[]): PackageDocumentation | null {
+  const readme = files.find((file) => /^readme\.(md|markdown)$/i.test(file.path.split("/").pop() ?? ""));
+  const skill = files.find((file) => /^skill\.md$/i.test(file.path.split("/").pop() ?? ""));
+  const documentation: PackageDocumentation = {
+    readmePath: readme?.path,
+    readmeMarkdown: readme ? markdownContentFor(readme) : undefined,
+    skillPath: skill?.path,
+    skillMarkdown: skill ? markdownContentFor(skill) : undefined,
+  };
+  return Object.values(documentation).some(Boolean) ? documentation : null;
+}
+
 export function buildArchive(files: ArchiveFileInput[]) {
   const entries: Record<string, Uint8Array> = {};
   for (const file of files) {
@@ -475,6 +499,7 @@ export function createPackageVersion(input: {
     compatibility: input.compatibility,
     capabilities: input.capabilities,
     verification: createVerificationSummary(input),
+    documentation: input.payload.documentation ?? documentationFromFiles(sourceFiles),
     archive,
   };
 }
