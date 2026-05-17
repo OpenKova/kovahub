@@ -279,6 +279,81 @@ describe("registry api", () => {
     }
   });
 
+  it("exposes readiness and protected metrics endpoints", async () => {
+    const previousMetricsToken = process.env.KOVAHUB_METRICS_TOKEN;
+    process.env.KOVAHUB_METRICS_TOKEN = "metrics-secret";
+    const app = await buildServerWithPackageFixtures();
+    try {
+      const ready = await app.inject("/readyz");
+      expect(ready.statusCode).toBe(200);
+      expect(ready.json()).toMatchObject({ status: "ready", repository: "ok" });
+
+      const status = await app.inject("/api/v1/status");
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toMatchObject({
+        service: "kovahub-api",
+        status: "ok",
+        metricsProtected: true,
+      });
+
+      const deniedMetrics = await app.inject("/api/v1/ops/metrics");
+      expect(deniedMetrics.statusCode).toBe(401);
+
+      const metrics = await app.inject({
+        url: "/api/v1/ops/metrics",
+        headers: { authorization: "Bearer metrics-secret" },
+      });
+      expect(metrics.statusCode).toBe(200);
+      expect(metrics.json()).toMatchObject({
+        status: "ok",
+        requests: expect.any(Number),
+        rateLimited: 0,
+      });
+
+      const prometheus = await app.inject({
+        url: "/metrics",
+        headers: { authorization: "Bearer metrics-secret" },
+      });
+      expect(prometheus.statusCode).toBe(200);
+      expect(prometheus.body).toContain("kovahub_http_requests_total");
+    } finally {
+      await app.close();
+      if (previousMetricsToken === undefined) delete process.env.KOVAHUB_METRICS_TOKEN;
+      else process.env.KOVAHUB_METRICS_TOKEN = previousMetricsToken;
+    }
+  });
+
+  it("enforces rate limits when enabled", async () => {
+    const previousEnabled = process.env.KOVAHUB_RATE_LIMIT_ENABLED;
+    const previousMax = process.env.KOVAHUB_RATE_LIMIT_MAX;
+    const previousWindow = process.env.KOVAHUB_RATE_LIMIT_WINDOW_MS;
+    process.env.KOVAHUB_RATE_LIMIT_ENABLED = "1";
+    process.env.KOVAHUB_RATE_LIMIT_MAX = "1";
+    process.env.KOVAHUB_RATE_LIMIT_WINDOW_MS = "60000";
+    const app = await buildServerWithPackageFixtures();
+    try {
+      const headers = { "x-forwarded-for": "203.0.113.77" };
+      const first = await app.inject({ url: "/api/v1/packages", headers });
+      expect(first.statusCode).toBe(200);
+
+      const limited = await app.inject({ url: "/api/v1/packages", headers });
+      expect(limited.statusCode).toBe(429);
+      expect(limited.headers["retry-after"]).toEqual(expect.any(String));
+      expect(limited.json()).toMatchObject({
+        error: "Rate limit exceeded.",
+        rateLimit: { scope: "global", limit: 1 },
+      });
+    } finally {
+      await app.close();
+      if (previousEnabled === undefined) delete process.env.KOVAHUB_RATE_LIMIT_ENABLED;
+      else process.env.KOVAHUB_RATE_LIMIT_ENABLED = previousEnabled;
+      if (previousMax === undefined) delete process.env.KOVAHUB_RATE_LIMIT_MAX;
+      else process.env.KOVAHUB_RATE_LIMIT_MAX = previousMax;
+      if (previousWindow === undefined) delete process.env.KOVAHUB_RATE_LIMIT_WINDOW_MS;
+      else process.env.KOVAHUB_RATE_LIMIT_WINDOW_MS = previousWindow;
+    }
+  });
+
   it("serves KovaHub-compatible package search and detail responses", async () => {
     const app = await buildServerWithPackageFixtures();
     const search = await app.inject("/api/v1/packages/search?q=context");

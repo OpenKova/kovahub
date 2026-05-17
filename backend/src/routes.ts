@@ -136,6 +136,27 @@ const skillDownloadQuerySchema = downloadQuerySchema.extend({
 });
 const pluginFamilies: PackageFamily[] = ["code-plugin", "bundle-plugin"];
 
+function intEnv(name: string, fallback: number) {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function boolEnv(name: string, fallback: boolean) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function backupPolicy() {
+  const retentionDays = intEnv("KOVAHUB_BACKUP_RETENTION_DAYS", 0);
+  return {
+    retentionDays,
+    cutoffMs: retentionDays > 0 ? Date.now() - retentionDays * 24 * 60 * 60 * 1000 : 0,
+    maxVersions: intEnv("KOVAHUB_BACKUP_MAX_VERSIONS", 0),
+    includeArchives: boolEnv("KOVAHUB_BACKUP_INCLUDE_ARCHIVES", true),
+  };
+}
+
 function publicPackageDetail(pkg: PackageRecord) {
   return {
     package: {
@@ -610,11 +631,6 @@ async function searchPackageCatalog(
 }
 
 export async function registerRegistryRoutes(app: FastifyInstance, repo: RegistryRepository) {
-  app.get("/healthz", async () => ({
-    ok: true,
-    service: "kovahub",
-  }));
-
   app.get("/api/v1/meta", async () => ({
     name: "KovaHub",
     registry: registryUrl(),
@@ -1044,9 +1060,12 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
   app.get("/api/v1/me/backup", async (request, reply) => {
     const user = await requireAuth(request, reply, repo);
     if (!user) return reply;
+    const policy = backupPolicy();
     const ownerHandles = new Set([user.handle]);
     for (const organization of await repo.listUserOrganizations(user.id)) ownerHandles.add(organization.handle);
     const packages: Array<z.infer<typeof publishPackageSchema>> = [];
+    let skippedByRetention = 0;
+    let skippedByLimit = 0;
     for (const ownerHandle of ownerHandles) {
       let cursor: string | null = null;
       do {
@@ -1055,9 +1074,17 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
           const pkg = await repo.getPackage(item.name);
           if (!pkg) continue;
           for (const version of [...pkg.versions].reverse()) {
-            const archive = await repo.getArchive(pkg.name, { version: version.version });
-            if (!archive) continue;
-            packages.push({
+            if (policy.cutoffMs > 0 && version.createdAt < policy.cutoffMs) {
+              skippedByRetention += 1;
+              continue;
+            }
+            if (policy.maxVersions > 0 && packages.length >= policy.maxVersions) {
+              skippedByLimit += 1;
+              continue;
+            }
+            const archive = policy.includeArchives ? await repo.getArchive(pkg.name, { version: version.version }) : null;
+            if (policy.includeArchives && !archive) continue;
+            const entry: z.infer<typeof publishPackageSchema> = {
               name: pkg.name,
               ownerHandle: pkg.ownerHandle ?? undefined,
               displayName: pkg.displayName,
@@ -1072,10 +1099,11 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
                     minGatewayVersion: version.compatibility.minGatewayVersion,
                   }
                 : undefined,
-              archiveBase64: archive.version.archive.toString("base64"),
               files: [],
               changelog: version.changelog,
-            });
+            };
+            if (archive) entry.archiveBase64 = archive.version.archive.toString("base64");
+            packages.push(entry);
           }
         }
         cursor = page.nextCursor;
@@ -1085,6 +1113,13 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       snapshot: {
         version: 1,
         generatedAt: Date.now(),
+        policy: {
+          retentionDays: policy.retentionDays,
+          maxVersions: policy.maxVersions,
+          includeArchives: policy.includeArchives,
+          skippedByRetention,
+          skippedByLimit,
+        },
         packages,
       },
     };

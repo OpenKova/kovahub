@@ -118,6 +118,7 @@ Implemented in the scaffold:
 - Package comments and authenticated package reports.
 - Reviewer moderation queue for reported packages.
 - Reviewer moderation hardening: user bans, report-threshold auto-hide, package hard-delete, and duplicate package merge.
+- Production ops basics: health/readiness endpoints, optional protected metrics, built-in rate limits, and backup export retention controls.
 - Unified search page with all/skills/plugins filters.
 - Audit page for security scan and moderation signals.
 - Owner package settings for metadata edits, rename, transfer, restore, delete, and yanking.
@@ -263,6 +264,8 @@ For Kova plugin archives, `package.json` must declare:
 
 Archive upload limits are controlled by `KOVAHUB_MAX_ARCHIVE_BYTES`, `KOVAHUB_MAX_ARCHIVE_ENTRIES`, and `KOVAHUB_MAX_EXTRACTED_BYTES`.
 Rendered README/SKILL documentation is capped by `KOVAHUB_MAX_DOCUMENTATION_BYTES`. Report auto-hide defaults to 3 open reports and can be changed with `KOVAHUB_AUTO_HIDE_REPORT_THRESHOLD`.
+Production rate limits are enabled automatically when `NODE_ENV=production`, or explicitly with `KOVAHUB_RATE_LIMIT_ENABLED=1`. Metrics are public unless `KOVAHUB_METRICS_TOKEN` is set.
+Backup exports can be trimmed with `KOVAHUB_BACKUP_RETENTION_DAYS`, `KOVAHUB_BACKUP_MAX_VERSIONS`, and `KOVAHUB_BACKUP_INCLUDE_ARCHIVES=false`.
 
 ## CLI
 
@@ -286,9 +289,8 @@ KovaHub now has the main ClawHub-style marketplace, publish, package detail, sta
 
 1. Add hosted scanner integrations, signed publish metadata, and rebuild verification beyond the built-in structural scanner.
 2. Add semantic/vector search, notifications, and reviewer assignment workflows.
-3. Add production rate limits, observability dashboards, and backup retention policies.
-4. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
-5. Run exact native Kova client integration tests against the deployed registry URL.
+3. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
+4. Run exact native Kova client integration tests against the deployed registry URL.
 
 ## References
 

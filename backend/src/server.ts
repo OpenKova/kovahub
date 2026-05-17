@@ -3,6 +3,7 @@ import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { registerAuthRoutes } from "./auth.js";
 import { loadLocalEnv } from "./env.js";
+import { registerOperationalRoutes } from "./observability.js";
 import { createPostgresRegistryRepository } from "./postgresRepository.js";
 import { InMemoryRegistryRepository, type RegistryRepository } from "./repository.js";
 import { registerRegistryRoutes } from "./routes.js";
@@ -17,6 +18,7 @@ async function createDefaultRepository(): Promise<RegistryRepository> {
 export async function buildServer(repo?: RegistryRepository) {
   const activeRepo = repo ?? (await createDefaultRepository());
   const app = Fastify({
+    trustProxy: true,
     logger: {
       level: process.env.LOG_LEVEL ?? "info",
     },
@@ -43,6 +45,7 @@ export async function buildServer(repo?: RegistryRepository) {
     reply.header("permissions-policy", "camera=(), microphone=(), geolocation=()");
   });
 
+  registerOperationalRoutes(app, activeRepo);
   await registerAuthRoutes(app, activeRepo);
   await registerRegistryRoutes(app, activeRepo);
 
