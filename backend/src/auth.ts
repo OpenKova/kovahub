@@ -30,6 +30,12 @@ const deviceTokenSchema = z.object({
   deviceCode: z.string().trim().min(8),
 });
 
+const e2eSessionSchema = z.object({
+  handle: z.string().trim().min(1).max(80),
+  email: z.string().email().optional(),
+  displayName: z.string().trim().min(1).max(80).optional(),
+});
+
 const optionalProfileText = (max: number) =>
   z.preprocess(
     (value) => {
@@ -178,6 +184,11 @@ function githubClientConfig() {
   const clientId = process.env.GITHUB_CLIENT_ID;
   const clientSecret = process.env.GITHUB_CLIENT_SECRET;
   return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
+
+function e2eAuthEnabled() {
+  if (process.env.NODE_ENV === "production") return false;
+  return process.env.KOVAHUB_E2E_AUTH === "1" || process.env.KOVAHUB_E2E_AUTH === "true";
 }
 
 function safeReturnTo(value: string | null | undefined) {
@@ -452,6 +463,29 @@ export async function registerAuthRoutes(app: FastifyInstance, repo: RegistryRep
       return redirectToFrontendAuthCallback(reply, { error: message, returnTo });
     }
   });
+
+  if (e2eAuthEnabled()) {
+    app.post("/api/v1/e2e/session", async (request, reply) => {
+      const parsed = e2eSessionSchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        reply.code(400);
+        return { error: parsed.error.issues[0]?.message ?? "Invalid E2E session payload." };
+      }
+
+      const handle = parsed.data.handle;
+      const emailHandle = handle.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+      const user = await repo.findOrCreateGitHubUser({
+        githubId: `e2e:${emailHandle}`,
+        login: handle,
+        email: parsed.data.email ?? `${emailHandle}@e2e.kovahub.local`,
+        displayName: parsed.data.displayName ?? handle,
+        imageUrl: null,
+      });
+      const token = app.jwt.sign(sessionPrincipal(user), { sub: user.id });
+      reply.code(201);
+      return { token, user: publicUser(user) };
+    });
+  }
 
   app.post("/api/v1/auth/device/start", async (request, reply) => {
     const parsed = deviceStartSchema.safeParse(request.body ?? {});

@@ -83,6 +83,20 @@ pnpm test
 pnpm build
 ```
 
+Browser E2E coverage starts isolated local backend/frontend ports and uses an in-memory registry:
+
+```bash
+pnpm exec playwright install chromium
+pnpm test:e2e
+```
+
+Run the Kova registry contract check against a local or hosted registry:
+
+```bash
+pnpm test:kova-contract
+KOVAHUB_REGISTRY_URL=https://your-registry.example.com pnpm test:kova-contract
+```
+
 ## Deployment
 
 For the free MVP hosting path, use Vercel for the frontend/API function and Supabase for Postgres plus archive storage. See [docs/deploy-vercel-supabase.md](docs/deploy-vercel-supabase.md).
@@ -133,12 +147,13 @@ Implemented in the scaffold:
 - First-party CLI login, publish, install, update, sync, pin, unpin, and local list workflows.
 - Frontend compose publishing, archive ZIP publishing, and API token management.
 - OpenAPI document at `/openapi.json`, baseline security headers, and GitHub Actions CI.
+- Browser E2E harness for publish, dashboard, device-login approval, and moderation queue flows.
 - Plugin compatibility metadata:
   - publish accepts `compatibility.pluginApi`
   - registry responses expose `compatibility.pluginApiRange`
   - registry responses expose `compatibility.minGatewayVersion`
 - Kova-compatible registry target env docs.
-- Kova client compatibility smoke tests for package, skill, version, and archive routes.
+- Kova client compatibility smoke tests and a deployable registry contract check for package, skill, version, and archive routes.
 
 ClawHub-inspired frontend routes now present in KovaHub:
 
@@ -291,10 +306,10 @@ pnpm --filter @kovahub/cli dev list
 
 ## Remaining Hardening
 
-KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth/install flows, import/export, moderation, documentation rendering, and compatibility surfaces. Remaining hardening work is:
+KovaHub now has the main ClawHub-style marketplace, publish, package detail, stars, dashboard, profile, search, comments, report, audit, registry, owner settings, organizations, CLI auth/install flows, import/export, moderation, documentation rendering, browser E2E coverage, Kova registry contract checks, and compatibility surfaces. Remaining hardening work is:
 
-1. Add browser E2E coverage for publish, dashboard, device login, and moderation flows.
-2. Run exact native Kova client integration tests against the deployed registry URL.
+1. Run the Kova registry contract check against the deployed production URL after hosting is live.
+2. Add a true native Kova CLI install smoke once the upstream Kova CLI exposes the KovaHub resolver in a stable command/test surface.
 
 ## References
 

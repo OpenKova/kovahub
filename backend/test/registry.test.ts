@@ -940,6 +940,63 @@ describe("registry api", () => {
     await app.close();
   });
 
+  it("gates test-only E2E session auth outside production", async () => {
+    const previousE2EAuth = process.env.KOVAHUB_E2E_AUTH;
+    const previousNodeEnv = process.env.NODE_ENV;
+    try {
+      delete process.env.KOVAHUB_E2E_AUTH;
+      process.env.NODE_ENV = "test";
+      const disabledApp = await buildServer();
+      const disabled = await disabledApp.inject({
+        method: "POST",
+        url: "/api/v1/e2e/session",
+        payload: { handle: "tester" },
+      });
+      expect(disabled.statusCode).toBe(404);
+      await disabledApp.close();
+
+      process.env.KOVAHUB_E2E_AUTH = "1";
+      const enabledApp = await buildServer();
+      const session = await enabledApp.inject({
+        method: "POST",
+        url: "/api/v1/e2e/session",
+        payload: { handle: "e2e-tester", displayName: "E2E Tester" },
+      });
+      expect(session.statusCode).toBe(201);
+      expect(session.json()).toMatchObject({
+        token: expect.any(String),
+        user: {
+          handle: "e2e-tester",
+          displayName: "E2E Tester",
+        },
+      });
+
+      const me = await enabledApp.inject({
+        method: "GET",
+        url: "/api/v1/auth/me",
+        headers: { authorization: `Bearer ${session.json().token}` },
+      });
+      expect(me.statusCode).toBe(200);
+      expect(me.json().user.handle).toBe("e2e-tester");
+      await enabledApp.close();
+
+      process.env.NODE_ENV = "production";
+      const productionApp = await buildServer();
+      const production = await productionApp.inject({
+        method: "POST",
+        url: "/api/v1/e2e/session",
+        payload: { handle: "tester" },
+      });
+      expect(production.statusCode).toBe(404);
+      await productionApp.close();
+    } finally {
+      if (previousE2EAuth === undefined) delete process.env.KOVAHUB_E2E_AUTH;
+      else process.env.KOVAHUB_E2E_AUTH = previousE2EAuth;
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
   it("supports CLI device login with GitHub session approval", async () => {
     const app = await buildServer();
     const jwt = await signInWithGitHub(app);
