@@ -101,6 +101,9 @@ const packageRenameSchema = z.object({
 const packageTransferSchema = z.object({
   targetHandle: z.string().trim().min(1).max(80),
 });
+const packageMergeSchema = z.object({
+  targetName: z.string().trim().min(1).max(214),
+});
 const packageVersionYankSchema = z.object({
   message: z.string().trim().max(500).nullable().optional(),
 });
@@ -793,6 +796,32 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { deleted: false };
     }
     return { deleted: true };
+  });
+
+  app.post("/api/v1/reviewer/packages/:name/merge", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageMergeSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package merge request."
+          : body.error.issues[0]?.message ?? "Invalid package merge payload.",
+      };
+    }
+    try {
+      const pkg = await repo.mergePackage(params.data.name, body.data.targetName, reviewer);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package merge failed." };
+    }
   });
 
   app.get("/api/v1/me/organizations", async (request, reply) => {

@@ -56,6 +56,7 @@ import {
   banReviewerUser,
   hardDeleteReviewerPackage,
   isAuthError,
+  mergeReviewerPackage,
   packageDownloadUrl,
   postPackageComment,
   publishArchivePackage,
@@ -2271,6 +2272,20 @@ function ModerationPanel() {
     }
   }
 
+  async function mergePackageFromReport(report: PackageReport) {
+    const targetName = window.prompt("Merge duplicate into package name");
+    if (!targetName?.trim()) return;
+    setStatus(null);
+    setError(null);
+    try {
+      const result = await mergeReviewerPackage(report.packageName, targetName.trim());
+      setReports((current) => current.filter((candidate) => candidate.packageName !== report.packageName));
+      setStatus(result.package ? `${report.packageName} merged into ${result.package.name}.` : "Package merged.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Package merge failed.");
+    }
+  }
+
   if (!available) return null;
 
   return (
@@ -2311,6 +2326,9 @@ function ModerationPanel() {
               </button>
               <button type="button" onClick={() => void hardDeletePackageFromReport(report)}>
                 Hard delete
+              </button>
+              <button type="button" onClick={() => void mergePackageFromReport(report)}>
+                Merge
               </button>
             </div>
           </article>

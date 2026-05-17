@@ -213,6 +213,7 @@ export type RegistryRepository = {
   transferPackage(name: string, user: AuthPrincipal, targetHandle: string): Promise<PackageRecord | null>;
   setPackageDeleted(name: string, user: AuthPrincipal, deleted: boolean): Promise<PackageRecord | null>;
   hardDeletePackage(name: string, reviewer: AuthPrincipal): Promise<boolean>;
+  mergePackage(sourceName: string, targetName: string, reviewer: AuthPrincipal): Promise<PackageRecord | null>;
   yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null): Promise<PackageRecord | null>;
   getArchive(name: string, selector?: { version?: string; tag?: string }): Promise<{ pkg: PackageRecord; version: PackageVersionRecord } | null>;
   recordDownload(name: string): Promise<void>;
@@ -1026,6 +1027,59 @@ export class InMemoryRegistryRepository implements RegistryRepository {
       if (normalizeKey(report.packageName) === normalizeKey(pkg.name)) this.packageReports.delete(id);
     }
     return true;
+  }
+
+  async mergePackage(sourceName: string, targetName: string, _reviewer: AuthPrincipal) {
+    const source = await this.getPackage(sourceName);
+    const target = await this.getPackage(targetName);
+    if (!source || !target) return null;
+    if (normalizeKey(source.name) === normalizeKey(target.name)) throw new Error("Source and target packages must be different.");
+    if (source.family !== target.family) throw new Error("Only packages from the same family can be merged.");
+
+    const preferredLatestVersion = target.latestVersion;
+    const targetVersions = new Set(target.versions.map((version) => version.version));
+    for (const version of source.versions) {
+      if (!targetVersions.has(version.version)) target.versions.push(version);
+    }
+    target.versions.sort((left, right) => right.createdAt - left.createdAt);
+    for (const version of target.versions) version.distTags = version.distTags.filter((tag) => tag !== "latest");
+    const latest =
+      target.versions.find((version) => version.version === preferredLatestVersion && !version.yankedAt) ??
+      latestActiveVersion(target.versions);
+    target.latestVersion = latest?.version ?? null;
+    if (latest && !latest.distTags.includes("latest")) latest.distTags.push("latest");
+    target.versions.sort((left, right) => {
+      if (left.version === target.latestVersion) return -1;
+      if (right.version === target.latestVersion) return 1;
+      return right.createdAt - left.createdAt;
+    });
+    target.tags = latest ? { ...target.tags, latest: latest.version } : {};
+    target.topics = normalizeTopics([...(target.topics ?? []), ...(source.topics ?? [])]);
+    target.stats = {
+      downloads: target.stats.downloads + source.stats.downloads,
+      installs: target.stats.installs + source.stats.installs,
+      stars: target.stats.stars + source.stats.stars,
+      versions: target.versions.length,
+    };
+    target.updatedAt = now();
+
+    for (const [key, star] of [...this.packageStars.entries()]) {
+      if (normalizeKey(star.packageName) !== normalizeKey(source.name)) continue;
+      this.packageStars.delete(key);
+      this.packageStars.set(this.packageStarKey(target.name, star.userId), {
+        ...star,
+        packageName: target.name,
+      });
+    }
+    for (const comment of this.packageComments.values()) {
+      if (normalizeKey(comment.packageName) === normalizeKey(source.name)) comment.packageName = target.name;
+    }
+    for (const report of this.packageReports.values()) {
+      if (normalizeKey(report.packageName) === normalizeKey(source.name)) report.packageName = target.name;
+    }
+
+    this.packages.delete(normalizeKey(source.name));
+    return target;
   }
 
   async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {

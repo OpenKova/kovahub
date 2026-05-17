@@ -59,6 +59,9 @@ export const openApiDocument = {
     "/api/v1/reviewer/packages/{name}": {
       delete: { summary: "Hard-delete a package", responses: { "200": { description: "Hard-delete result" } } },
     },
+    "/api/v1/reviewer/packages/{name}/merge": {
+      post: { summary: "Merge duplicate package into a target", responses: { "200": { description: "Merged package" } } },
+    },
     "/api/v1/me/backup": {
       get: { summary: "Export publisher package backup", responses: { "200": { description: "Backup snapshot" } } },
     },

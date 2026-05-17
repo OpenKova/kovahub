@@ -234,6 +234,13 @@ export async function hardDeleteReviewerPackage(name: string) {
   });
 }
 
+export async function mergeReviewerPackage(sourceName: string, targetName: string) {
+  return request<PackageDetail>(`/api/v1/reviewer/packages/${encodeURIComponent(sourceName)}/merge`, {
+    method: "POST",
+    body: JSON.stringify({ targetName }),
+  });
+}
+
 export async function publishPackage(payload: PublishPayload) {
   return request<PackageDetail>("/api/v1/packages", {
     method: "POST",

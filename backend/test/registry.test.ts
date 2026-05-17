@@ -1360,6 +1360,123 @@ describe("registry api", () => {
     }
   });
 
+  it("lets reviewers merge duplicate packages into a canonical package", async () => {
+    const previousReviewers = process.env.KOVAHUB_REVIEWER_HANDLES;
+    process.env.KOVAHUB_REVIEWER_HANDLES = "reviewer";
+    const repo = new InMemoryRegistryRepository();
+    const reviewer = await repo.createUser({
+      handle: "reviewer",
+      email: "reviewer@example.com",
+      passwordHash: "reviewer",
+    });
+    const app = await buildServer(repo);
+    try {
+      const userJwt = await signInWithGitHub(app);
+      const reviewerJwt = app.jwt.sign(
+        {
+          id: reviewer.id,
+          handle: reviewer.handle,
+          email: reviewer.email,
+        },
+        { sub: reviewer.id },
+      );
+      const basePayload = {
+        family: "code-plugin",
+        compatibility: {
+          pluginApi: "^1.0.0",
+          minGatewayVersion: "2026.3.0",
+        },
+      };
+
+      const canonical = await app.inject({
+        method: "POST",
+        url: "/api/v1/packages",
+        headers: { authorization: `Bearer ${userJwt}` },
+        payload: {
+          ...basePayload,
+          name: "@tester/canonical-plugin",
+          displayName: "Canonical Plugin",
+          version: "0.2.0",
+          tags: ["canonical"],
+        },
+      });
+      expect(canonical.statusCode).toBe(201);
+
+      const duplicate = await app.inject({
+        method: "POST",
+        url: "/api/v1/packages",
+        headers: { authorization: `Bearer ${userJwt}` },
+        payload: {
+          ...basePayload,
+          name: "@tester/duplicate-plugin",
+          displayName: "Duplicate Plugin",
+          version: "0.1.0",
+          tags: ["duplicate"],
+        },
+      });
+      expect(duplicate.statusCode).toBe(201);
+
+      const duplicatePath = "/api/v1/packages/%40tester%2Fduplicate-plugin";
+      await app.inject({ method: "POST", url: `${duplicatePath}/install` });
+      await app.inject({ method: "POST", url: `${duplicatePath}/star` });
+      const comment = await app.inject({
+        method: "POST",
+        url: `${duplicatePath}/comments`,
+        headers: { authorization: `Bearer ${userJwt}` },
+        payload: { body: "This duplicate should move." },
+      });
+      expect(comment.statusCode).toBe(201);
+      const report = await app.inject({
+        method: "POST",
+        url: `${duplicatePath}/report`,
+        headers: { authorization: `Bearer ${userJwt}` },
+        payload: { reason: "Duplicate of canonical package." },
+      });
+      expect(report.statusCode).toBe(201);
+
+      const merged = await app.inject({
+        method: "POST",
+        url: "/api/v1/reviewer/packages/%40tester%2Fduplicate-plugin/merge",
+        headers: { authorization: `Bearer ${reviewerJwt}` },
+        payload: { targetName: "@tester/canonical-plugin" },
+      });
+      expect(merged.statusCode).toBe(200);
+      expect(merged.json().package).toMatchObject({
+        name: "@tester/canonical-plugin",
+        latestVersion: "0.2.0",
+        stats: {
+          installs: 1,
+          stars: 1,
+          versions: 2,
+        },
+      });
+      expect(merged.json().package.topics).toEqual(["canonical", "duplicate"]);
+      expect(merged.json().package.versions.map((version: { version: string }) => version.version)).toEqual([
+        "0.2.0",
+        "0.1.0",
+      ]);
+
+      const missingSource = await app.inject(duplicatePath);
+      expect(missingSource.statusCode).toBe(404);
+      const movedComments = await app.inject("/api/v1/packages/%40tester%2Fcanonical-plugin/comments");
+      expect(movedComments.json().items).toEqual([
+        expect.objectContaining({ body: "This duplicate should move." }),
+      ]);
+      const reports = await app.inject({
+        method: "GET",
+        url: "/api/v1/reviewer/reports?status=open",
+        headers: { authorization: `Bearer ${reviewerJwt}` },
+      });
+      expect(reports.json().items).toEqual([
+        expect.objectContaining({ packageName: "@tester/canonical-plugin" }),
+      ]);
+    } finally {
+      if (previousReviewers === undefined) delete process.env.KOVAHUB_REVIEWER_HANDLES;
+      else process.env.KOVAHUB_REVIEWER_HANDLES = previousReviewers;
+      await app.close();
+    }
+  });
+
   it("allows browser clients to revoke API tokens", async () => {
     const app = await buildServer();
     const jwt = await signInWithGitHub(app);

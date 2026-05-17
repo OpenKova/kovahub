@@ -1330,6 +1330,129 @@ export class PostgresRegistryRepository implements RegistryRepository {
     return result.rowCount === 1;
   }
 
+  async mergePackage(sourceName: string, targetName: string, _reviewer: AuthPrincipal) {
+    const sourceKey = normalizeKey(sourceName);
+    const targetKey = normalizeKey(targetName);
+    if (sourceKey === targetKey) throw new Error("Source and target packages must be different.");
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const packages = await client.query<{
+        id: string;
+        name: string;
+        family: PackageFamily;
+        latest_version: string | null;
+        topics: string[];
+        stats: Partial<PackageRecord["stats"]> | null;
+      }>(
+        `
+          select id, name, family, latest_version, topics, stats
+          from packages
+          where name = any($1::text[])
+          for update
+        `,
+        [[sourceKey, targetKey]],
+      );
+      const source = packages.rows.find((row) => row.name === sourceKey);
+      const target = packages.rows.find((row) => row.name === targetKey);
+      if (!source || !target) {
+        await client.query("rollback");
+        return null;
+      }
+      if (source.family !== target.family) throw new Error("Only packages from the same family can be merged.");
+
+      await client.query(
+        `
+          update package_versions pv
+          set package_id = $2
+          where pv.package_id = $1
+            and not exists (
+              select 1
+              from package_versions existing
+              where existing.package_id = $2 and existing.version = pv.version
+            )
+        `,
+        [source.id, target.id],
+      );
+      await client.query("delete from package_versions where package_id = $1", [source.id]);
+      await client.query("update package_comments set package_id = $2 where package_id = $1", [source.id, target.id]);
+      await client.query("update package_reports set package_id = $2 where package_id = $1", [source.id, target.id]);
+      await client.query(
+        `
+          insert into package_stars (package_id, user_id, created_at)
+          select $2, user_id, min(created_at)
+          from package_stars
+          where package_id = $1
+          group by user_id
+          on conflict (package_id, user_id) do nothing
+        `,
+        [source.id, target.id],
+      );
+      await client.query("delete from package_stars where package_id = $1", [source.id]);
+
+      await client.query("update package_versions set dist_tags = array_remove(dist_tags, 'latest') where package_id = $1", [
+        target.id,
+      ]);
+      const latest = await client.query<{ version: string }>(
+        `
+          select version
+          from package_versions
+          where package_id = $1 and yanked_at is null
+          order by case when version = $2 then 0 else 1 end, created_at desc
+          limit 1
+        `,
+        [target.id, target.latest_version],
+      );
+      const latestVersion = latest.rows[0]?.version ?? null;
+      if (latestVersion) {
+        await client.query(
+          `
+            update package_versions
+            set dist_tags = array_append(dist_tags, 'latest')
+            where package_id = $1 and version = $2
+          `,
+          [target.id, latestVersion],
+        );
+      }
+
+      const sourceStats = normalizeStats(source.stats);
+      const targetStats = normalizeStats(target.stats);
+      const topics = normalizeTopics([...(target.topics ?? []), ...(source.topics ?? [])]);
+      await client.query(
+        `
+          update packages
+          set
+            topics = $2,
+            latest_version = $3,
+            stats = jsonb_build_object(
+              'downloads', $4::int,
+              'installs', $5::int,
+              'stars', $6::int,
+              'versions', (select count(*)::int from package_versions where package_id = $1)
+            ),
+            updated_at = now()
+          where id = $1
+        `,
+        [
+          target.id,
+          topics,
+          latestVersion,
+          targetStats.downloads + sourceStats.downloads,
+          targetStats.installs + sourceStats.installs,
+          targetStats.stars + sourceStats.stars,
+        ],
+      );
+      await client.query("delete from packages where id = $1", [source.id]);
+      await client.query("commit");
+      return this.getPackage(targetKey);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async yankPackageVersion(name: string, version: string, user: AuthPrincipal, message?: string | null) {
     const packageName = normalizeKey(name);
     const client = await this.pool.connect();
@@ -1934,7 +2057,9 @@ export class PostgresRegistryRepository implements RegistryRepository {
         left join package_files pf on pf.package_version_id = pv.id
         where pv.package_id = $1
         group by pv.id
-        order by pv.created_at desc
+        order by
+          case when pv.version = (select latest_version from packages where id = $1) then 0 else 1 end,
+          pv.created_at desc
       `,
       [packageId],
     );
