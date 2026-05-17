@@ -56,7 +56,7 @@ describe("Kova client compatibility smoke", () => {
       },
       verification: {
         tier: "structural",
-        scanStatus: "pending",
+        scanStatus: "clean",
       },
     });
 

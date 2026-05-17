@@ -43,6 +43,12 @@ export type PackageVerificationSummary = {
   scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
   moderationStatus?: "pending" | "approved" | "rejected";
   riskLevel?: "unknown" | "low" | "medium" | "high";
+  findings?: Array<{
+    severity: "low" | "medium" | "high";
+    code: string;
+    message: string;
+    path?: string;
+  }>;
 };
 
 export type PackageFile = {
@@ -186,6 +192,7 @@ export type PreparedPublishPackageInput = PublishPackageInput & {
   archiveBuffer?: Buffer;
   archiveFiles?: PackageFile[];
   documentation?: PackageDocumentation | null;
+  verification?: PackageVerificationSummary | null;
 };
 
 export type PackageSettingsInput = {

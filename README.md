@@ -124,7 +124,7 @@ Implemented in the scaffold:
 - Package detail and version detail API shapes.
 - Latest version tag behavior.
 - ZIP archive download endpoints.
-- Non-blocking moderation and security scan status placeholders in package verification metadata.
+- Structural archive security scan signals, source/provenance metadata, and moderation status in package verification metadata.
 - Frontend compose publishing, archive ZIP publishing, and API token management.
 - OpenAPI document at `/openapi.json`, baseline security headers, and GitHub Actions CI.
 - Plugin compatibility metadata:

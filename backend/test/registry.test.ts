@@ -310,7 +310,7 @@ describe("registry api", () => {
     expect(detail.json().package.compatibility.pluginApiRange).toBe("^1.0.0");
     expect(detail.json().package.topics).toEqual(["context", "gateway"]);
     expect(detail.json().package.verification).toMatchObject({
-      scanStatus: "pending",
+      scanStatus: "clean",
       moderationStatus: "approved",
     });
     expect(detail.json().package.versions[0].documentation).toMatchObject({
@@ -469,12 +469,12 @@ describe("registry api", () => {
     expect(publish.json().package.latestVersion).toBe("0.1.0");
     expect(publish.json().package.topics).toEqual(["demo", "gateway"]);
     expect(publish.json().package).toMatchObject({
-      scanStatus: "pending",
+      scanStatus: "clean",
       moderationStatus: "pending",
       verification: {
-        scanStatus: "pending",
+        scanStatus: "clean",
         moderationStatus: "pending",
-        riskLevel: "unknown",
+        riskLevel: "medium",
       },
     });
 
@@ -486,7 +486,7 @@ describe("registry api", () => {
       readmeMarkdown: expect.stringContaining("Demo Plugin"),
     });
     expect(version.json().version.verification).toMatchObject({
-      scanStatus: "pending",
+      scanStatus: "clean",
       moderationStatus: "pending",
     });
 
@@ -1431,9 +1431,9 @@ describe("registry api", () => {
       "compat:gateway-min",
     ]);
     expect(publish.json().package.verification).toMatchObject({
-      scanStatus: "pending",
+      scanStatus: "clean",
       moderationStatus: "pending",
-      riskLevel: "unknown",
+      riskLevel: "medium",
     });
 
     const version = await app.inject("/api/v1/packages/%40tester%2Farchive-plugin/versions/0.2.0");

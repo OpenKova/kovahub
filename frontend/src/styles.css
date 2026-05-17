@@ -3164,6 +3164,36 @@ label textarea {
   line-height: 1.5;
 }
 
+.finding-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.finding-row {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--hv2-border, rgba(24, 24, 27, 0.15));
+  border-radius: 8px;
+  background: var(--hv2-surface, rgba(255, 255, 255, 0.52));
+  padding: 10px 12px;
+}
+
+.finding-row strong {
+  color: var(--hv2-text, #18181b);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.finding-row span {
+  color: var(--hv2-text-secondary, #52525b);
+}
+
+.finding-row code {
+  color: var(--hv2-text-tertiary, #71717a);
+  font-size: 12px;
+}
+
 @media (max-width: 980px) {
   .navbar-inner,
   .workspace-head,

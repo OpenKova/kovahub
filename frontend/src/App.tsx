@@ -791,6 +791,18 @@ function DetailPanel({
               <InfoCell label="tier" value={formatStatus(verification?.tier)} />
               <InfoCell label="risk" value={formatStatus(verification?.riskLevel)} />
             </div>
+            {verification?.summary ? <p className="content-muted">{verification.summary}</p> : null}
+            {verification?.findings?.length ? (
+              <div className="finding-list">
+                {verification.findings.map((finding) => (
+                  <div className={`finding-row severity-${finding.severity}`} key={`${finding.code}-${finding.path ?? "artifact"}`}>
+                    <strong>{finding.code}</strong>
+                    <span>{finding.message}</span>
+                    {finding.path ? <code>{finding.path}</code> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {documentationMarkdown ? (

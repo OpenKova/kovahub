@@ -17,6 +17,7 @@ import {
   type PreparedPublishPackageInput,
   type PublishPackageInput,
 } from "./contracts.js";
+import { scanPackageArtifact, type SecurityScanFile } from "./securityScan.js";
 
 export type AuthPrincipal = {
   id: string;
@@ -284,6 +285,16 @@ function documentationFromFiles(files: ArchiveFileInput[]): PackageDocumentation
   return Object.values(documentation).some(Boolean) ? documentation : null;
 }
 
+function scanFilesFromArchiveFiles(files: ArchiveFileInput[]): SecurityScanFile[] {
+  return files.map((file) => ({
+    path: file.path,
+    content: file.content,
+    contentBase64: file.contentBase64,
+    contentType: file.contentType,
+    size: fileBytes(file).byteLength,
+  }));
+}
+
 export function buildArchive(files: ArchiveFileInput[]) {
   const entries: Record<string, Uint8Array> = {};
   for (const file of files) {
@@ -463,19 +474,13 @@ export function normalizeCapabilities(
 export function createVerificationSummary(input: {
   payload: PreparedPublishPackageInput;
   capabilities: PackageCapabilitySummary | null;
+  files: ArchiveFileInput[];
 }): PackageVerificationSummary {
-  const moderationStatus = input.payload.channel === "official" ? "approved" : "pending";
-  return {
-    tier: "structural",
-    scope: "artifact-only",
-    summary:
-      moderationStatus === "approved"
-        ? "Structural validation passed; automated security scan is queued."
-        : "Structural validation passed; moderation and automated security scan are queued.",
-    scanStatus: "pending",
-    moderationStatus,
-    riskLevel: input.capabilities?.executesCode ? "unknown" : "low",
-  };
+  return input.payload.verification ?? scanPackageArtifact({
+    files: scanFilesFromArchiveFiles(input.files),
+    executesCode: Boolean(input.capabilities?.executesCode),
+    channel: input.payload.channel as PackageChannel,
+  });
 }
 
 export function createPackageVersion(input: {
@@ -498,7 +503,7 @@ export function createPackageVersion(input: {
     sha256hash: sha256Hex(archive),
     compatibility: input.compatibility,
     capabilities: input.capabilities,
-    verification: createVerificationSummary(input),
+    verification: createVerificationSummary({ ...input, files: sourceFiles }),
     documentation: input.payload.documentation ?? documentationFromFiles(sourceFiles),
     archive,
   };

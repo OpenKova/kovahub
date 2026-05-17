@@ -8,9 +8,11 @@ import {
   type PackageDocumentation,
   type PackageFamily,
   type PackageFile,
+  type PackageVerificationSummary,
   type PreparedPublishPackageInput,
   type PublishPackageInput,
 } from "./contracts.js";
+import { scanPackageArtifact, type SecurityScanFile } from "./securityScan.js";
 
 const maxArchiveEntries = Number.parseInt(process.env.KOVAHUB_MAX_ARCHIVE_ENTRIES ?? "1000", 10);
 const maxExtractedBytes = Number.parseInt(process.env.KOVAHUB_MAX_EXTRACTED_BYTES ?? `${50 * 1024 * 1024}`, 10);
@@ -27,6 +29,7 @@ export type ArchiveInspectionResult = {
     description?: string;
   } | null;
   documentation: PackageDocumentation | null;
+  securityFiles: SecurityScanFile[];
 };
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -223,6 +226,16 @@ export function inspectZipArchive(archive: Buffer): ArchiveInspectionResult {
     packageJson: packageEntry ? parseJson(packageEntry, "package.json") : null,
     skillManifest: skillEntry ? parseSkillFrontmatter(skillEntry) : null,
     documentation: buildArchiveDocumentation(entries, root),
+    securityFiles: [...entries.entries()].map(([path, bytes]) => ({
+      path,
+      bytes,
+      size: bytes.byteLength,
+      contentType: path.endsWith(".json")
+        ? "application/json"
+        : path.endsWith(".md")
+          ? "text/markdown"
+          : undefined,
+    })),
   };
 }
 
@@ -280,11 +293,18 @@ export function preparePublishInputFromArchive(params: {
   if (!parsed.success) {
     throw new Error(parsed.error.issues[0]?.message ?? "Archive metadata is not publishable.");
   }
+  const verification: PackageVerificationSummary = scanPackageArtifact({
+    files: inspection.securityFiles,
+    packageJson,
+    executesCode: parsed.data.family === "code-plugin" || Boolean(parsed.data.capabilities?.executesCode),
+    channel: parsed.data.channel,
+  });
 
   return {
     ...parsed.data,
     archiveBuffer: params.archive,
     archiveFiles: inspection.files,
     documentation: inspection.documentation,
+    verification,
   };
 }
