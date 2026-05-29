@@ -5,14 +5,18 @@ import {
   publishPackageSchema,
   type PackageCapabilitySummary,
   type PackageCompatibility,
+  type PackageDocumentation,
   type PackageFamily,
   type PackageFile,
+  type PackageVerificationSummary,
   type PreparedPublishPackageInput,
   type PublishPackageInput,
 } from "./contracts.js";
+import { scanPackageArtifact, type SecurityScanFile } from "./securityScan.js";
 
 const maxArchiveEntries = Number.parseInt(process.env.KOVAHUB_MAX_ARCHIVE_ENTRIES ?? "1000", 10);
 const maxExtractedBytes = Number.parseInt(process.env.KOVAHUB_MAX_EXTRACTED_BYTES ?? `${50 * 1024 * 1024}`, 10);
+const maxDocumentationBytes = Number.parseInt(process.env.KOVAHUB_MAX_DOCUMENTATION_BYTES ?? `${256 * 1024}`, 10);
 const safeRelativePath = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[A-Za-z0-9._@+/-]+$/;
 
 type JsonRecord = Record<string, unknown>;
@@ -24,6 +28,8 @@ export type ArchiveInspectionResult = {
     name?: string;
     description?: string;
   } | null;
+  documentation: PackageDocumentation | null;
+  securityFiles: SecurityScanFile[];
 };
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -72,7 +78,7 @@ function parseSkillFrontmatter(bytes: Uint8Array) {
 
 function singleRootPrefix(paths: string[]) {
   const roots = new Set(paths.map((path) => path.split("/")[0]).filter(Boolean));
-  return roots.size === 1 ? [...roots][0] : null;
+  return roots.size === 1 ? [...roots][0] ?? null : null;
 }
 
 function findEntry(entries: Map<string, Uint8Array>, paths: string[]) {
@@ -81,6 +87,44 @@ function findEntry(entries: Map<string, Uint8Array>, paths: string[]) {
     if (entry) return entry;
   }
   return undefined;
+}
+
+function findEntryWithPath(entries: Map<string, Uint8Array>, paths: string[]) {
+  for (const path of paths) {
+    const entry = entries.get(path);
+    if (entry) return { path, bytes: entry };
+  }
+  return null;
+}
+
+function readDocumentationEntry(entry: { path: string; bytes: Uint8Array } | null) {
+  if (!entry) return undefined;
+  if (entry.bytes.byteLength > maxDocumentationBytes) {
+    throw new Error(`${entry.path} is larger than ${maxDocumentationBytes} bytes.`);
+  }
+  return strFromU8(entry.bytes);
+}
+
+function buildArchiveDocumentation(
+  entries: Map<string, Uint8Array>,
+  root: string | null,
+): PackageDocumentation | null {
+  const readme = findEntryWithPath(entries, [
+    "README.md",
+    "README.markdown",
+    "readme.md",
+    root ? `${root}/README.md` : "",
+    root ? `${root}/README.markdown` : "",
+    root ? `${root}/readme.md` : "",
+  ].filter(Boolean));
+  const skill = findEntryWithPath(entries, ["SKILL.md", root ? `${root}/SKILL.md` : ""].filter(Boolean));
+  const documentation: PackageDocumentation = {
+    readmePath: readme?.path,
+    readmeMarkdown: readDocumentationEntry(readme),
+    skillPath: skill?.path,
+    skillMarkdown: readDocumentationEntry(skill),
+  };
+  return Object.values(documentation).some(Boolean) ? documentation : null;
 }
 
 function normalizeKovaCompatibility(packageJson: JsonRecord): PackageCompatibility | null {
@@ -181,6 +225,17 @@ export function inspectZipArchive(archive: Buffer): ArchiveInspectionResult {
     })),
     packageJson: packageEntry ? parseJson(packageEntry, "package.json") : null,
     skillManifest: skillEntry ? parseSkillFrontmatter(skillEntry) : null,
+    documentation: buildArchiveDocumentation(entries, root),
+    securityFiles: [...entries.entries()].map(([path, bytes]) => ({
+      path,
+      bytes,
+      size: bytes.byteLength,
+      contentType: path.endsWith(".json")
+        ? "application/json"
+        : path.endsWith(".md")
+          ? "text/markdown"
+          : undefined,
+    })),
   };
 }
 
@@ -238,10 +293,18 @@ export function preparePublishInputFromArchive(params: {
   if (!parsed.success) {
     throw new Error(parsed.error.issues[0]?.message ?? "Archive metadata is not publishable.");
   }
+  const verification: PackageVerificationSummary = scanPackageArtifact({
+    files: inspection.securityFiles,
+    packageJson,
+    executesCode: parsed.data.family === "code-plugin" || Boolean(parsed.data.capabilities?.executesCode),
+    channel: parsed.data.channel,
+  });
 
   return {
     ...parsed.data,
     archiveBuffer: params.archive,
     archiveFiles: inspection.files,
+    documentation: inspection.documentation,
+    verification,
   };
 }

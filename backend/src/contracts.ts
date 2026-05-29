@@ -41,6 +41,38 @@ export type PackageVerificationSummary = {
   sourceCommit?: string;
   hasProvenance?: boolean;
   scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
+  moderationStatus?: "pending" | "approved" | "rejected";
+  riskLevel?: "unknown" | "low" | "medium" | "high";
+  signature?: {
+    algorithm: "sha256" | "hmac-sha256";
+    digest?: string;
+    signature?: string;
+    keyId?: string;
+    signer?: string;
+    signedAt?: number;
+    verified: boolean;
+    reason?: string;
+  };
+  scanner?: {
+    provider: "structural" | "webhook" | "manual";
+    status: "clean" | "suspicious" | "malicious" | "queued" | "failed" | "not-run";
+    checkedAt?: number;
+    url?: string;
+  };
+  rebuild?: {
+    status: "not-run" | "queued" | "passed" | "failed";
+    checkedAt?: number;
+    command?: string;
+    logUrl?: string;
+    sourceRepo?: string;
+    sourceCommit?: string;
+  };
+  findings?: Array<{
+    severity: "low" | "medium" | "high";
+    code: string;
+    message: string;
+    path?: string;
+  }>;
 };
 
 export type PackageFile = {
@@ -48,6 +80,20 @@ export type PackageFile = {
   size: number;
   sha256: string;
   contentType?: string;
+};
+
+export type PackageDocumentation = {
+  readmePath?: string;
+  readmeMarkdown?: string;
+  skillPath?: string;
+  skillMarkdown?: string;
+};
+
+export type PackageStats = {
+  downloads: number;
+  installs: number;
+  stars: number;
+  versions: number;
 };
 
 export type PackageListItem = {
@@ -59,17 +105,24 @@ export type PackageListItem = {
   isOfficial: boolean;
   summary?: string | null;
   ownerHandle?: string | null;
+  topics?: string[];
   createdAt: number;
   updatedAt: number;
   latestVersion?: string | null;
   capabilityTags?: string[];
   executesCode?: boolean;
   verificationTier?: string | null;
+  scanStatus?: PackageVerificationSummary["scanStatus"] | null;
+  moderationStatus?: PackageVerificationSummary["moderationStatus"] | null;
+  deletedAt?: number | null;
+  stats?: PackageStats;
 };
 
 export type PackageVersionRecord = {
   version: string;
   createdAt: number;
+  yankedAt?: number | null;
+  yankMessage?: string | null;
   changelog: string;
   distTags: string[];
   files: PackageFile[];
@@ -77,6 +130,7 @@ export type PackageVersionRecord = {
   compatibility?: PackageCompatibility | null;
   capabilities?: PackageCapabilitySummary | null;
   verification?: PackageVerificationSummary | null;
+  documentation?: PackageDocumentation | null;
   archive: Buffer;
 };
 
@@ -86,16 +140,12 @@ export type PackageRecord = PackageListItem & {
   capabilities?: PackageCapabilitySummary | null;
   verification?: PackageVerificationSummary | null;
   versions: PackageVersionRecord[];
-  stats: {
-    downloads: number;
-    installs: number;
-    stars: number;
-    versions: number;
-  };
+  stats: PackageStats;
 };
 
 const semverLike = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const packageNameLike = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+const skillSlugLike = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
 const safeRelativePath = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[A-Za-z0-9._@+/-]+$/;
 
 export const fileInputSchema = z
@@ -134,27 +184,58 @@ export const capabilityInputSchema = z
   })
   .optional();
 
-export const publishPackageSchema = z.object({
-  name: z.string().trim().min(1).max(214).regex(packageNameLike),
-  displayName: z.string().trim().min(1).max(120).optional(),
-  ownerHandle: z.string().trim().min(1).max(80).optional(),
-  family: z.enum(packageFamilies),
-  version: z.string().trim().regex(semverLike),
-  summary: z.string().trim().max(500).optional(),
-  changelog: z.string().default(""),
-  channel: z.enum(packageChannels).default("community"),
-  tags: z.array(z.string().trim().min(1).max(48)).default([]),
-  compatibility: compatibilityInputSchema,
-  capabilities: capabilityInputSchema,
-  archiveBase64: z.string().optional(),
-  files: z.array(fileInputSchema).default([]),
-});
+export const publishSignatureSchema = z
+  .object({
+    algorithm: z.enum(["sha256", "hmac-sha256"]).default("sha256"),
+    digest: z.string().trim().min(1).optional(),
+    signature: z.string().trim().min(1).optional(),
+    keyId: z.string().trim().min(1).max(120).optional(),
+    signer: z.string().trim().min(1).max(200).optional(),
+    signedAt: z.coerce.number().int().positive().optional(),
+  })
+  .optional();
+
+export const publishPackageSchema = z
+  .object({
+    name: z.string().trim().min(1).max(214).regex(packageNameLike),
+    displayName: z.string().trim().min(1).max(120).optional(),
+    ownerHandle: z.string().trim().min(1).max(80).optional(),
+    family: z.enum(packageFamilies),
+    version: z.string().trim().regex(semverLike),
+    summary: z.string().trim().max(500).optional(),
+    changelog: z.string().default(""),
+    channel: z.enum(packageChannels).default("community"),
+    tags: z.array(z.string().trim().min(1).max(48)).default([]),
+    compatibility: compatibilityInputSchema,
+    capabilities: capabilityInputSchema,
+    signature: publishSignatureSchema,
+    archiveBase64: z.string().optional(),
+    files: z.array(fileInputSchema).default([]),
+  })
+  .superRefine((value, ctx) => {
+    if (value.family === "skill" && !skillSlugLike.test(value.name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["name"],
+        message: "Skill packages require a Kova skill slug like release-notes-sherpa.",
+      });
+    }
+  });
 
 export type PublishPackageInput = z.infer<typeof publishPackageSchema>;
 
 export type PreparedPublishPackageInput = PublishPackageInput & {
   archiveBuffer?: Buffer;
   archiveFiles?: PackageFile[];
+  documentation?: PackageDocumentation | null;
+  verification?: PackageVerificationSummary | null;
+};
+
+export type PackageSettingsInput = {
+  displayName?: string;
+  summary?: string | null;
+  tags?: string[];
+  channel?: PackageChannel;
 };
 
 export function normalizeCompatibility(
@@ -182,11 +263,16 @@ export function toPackageListItem(record: PackageRecord): PackageListItem {
     isOfficial: record.isOfficial,
     summary: record.summary,
     ownerHandle: record.ownerHandle,
+    topics: record.topics,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     latestVersion: record.latestVersion,
     capabilityTags: record.capabilityTags,
     executesCode: record.executesCode,
     verificationTier: record.verificationTier,
+    scanStatus: record.verification?.scanStatus ?? null,
+    moderationStatus: record.verification?.moderationStatus ?? null,
+    deletedAt: record.deletedAt ?? null,
+    stats: record.stats,
   };
 }

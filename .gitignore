@@ -7,6 +7,8 @@ coverage/
 .DS_Store
 *:Zone.Identifier
 *.log
+playwright-report/
+test-results/
 
 backend/.data/
 frontend/.vite/

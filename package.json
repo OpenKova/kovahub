@@ -9,8 +9,11 @@
     "build": "pnpm -r build",
     "dev:backend": "pnpm --filter @kovahub/backend dev",
     "dev:frontend": "pnpm --filter @kovahub/frontend dev",
+    "dev:e2e": "node scripts/dev-e2e.mjs",
+    "test:e2e": "playwright test",
+    "test:kova-contract": "node scripts/kova-registry-contract-check.mjs",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.vercel.json --noEmit"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

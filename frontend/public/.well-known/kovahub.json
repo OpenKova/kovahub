@@ -1,0 +1,22 @@
+{
+  "name": "KovaHub",
+  "apiBase": "/",
+  "authBase": "/",
+  "siteBase": "/",
+  "registry": "/",
+  "site": "/",
+  "minCliVersion": "0.0.1",
+  "env": {
+    "url": "KOVAHUB_URL",
+    "kovaUrl": "KOVA_KOVAHUB_URL",
+    "registry": "KOVAHUB_REGISTRY",
+    "site": "KOVAHUB_SITE"
+  },
+  "routes": {
+    "packages": "/api/v1/packages",
+    "plugins": "/api/v1/plugins",
+    "skills": "/api/v1/skills",
+    "search": "/api/v1/search",
+    "whoami": "/api/v1/whoami"
+  }
+}

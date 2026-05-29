@@ -3,18 +3,32 @@ import { z } from "zod";
 import {
   packageFamilies,
   publishPackageSchema,
+  type PackageListItem,
   toPackageListItem,
   type PackageFamily,
   type PackageRecord,
   type PackageVersionRecord,
 } from "./contracts.js";
 import { requireAuth } from "./auth.js";
+import { openApiDocument } from "./openapi.js";
 import { preparePublishInputFromArchive } from "./packageInspection.js";
-import type { RegistryRepository } from "./repository.js";
+import type {
+  AuthPrincipal,
+  NotificationRecord,
+  OrganizationMemberRecord,
+  OrganizationRecord,
+  PackageCommentRecord,
+  PackageReportRecord,
+  RegistryRepository,
+  UserAccount,
+} from "./repository.js";
 
 const listQuerySchema = z.object({
   q: z.string().optional(),
   family: z.enum(packageFamilies).optional(),
+  owner: z.string().trim().min(1).optional(),
+  tag: z.string().trim().min(1).optional(),
+  sort: z.enum(["recent", "popular", "trending"]).optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
 });
@@ -22,12 +36,122 @@ const listQuerySchema = z.object({
 const searchQuerySchema = z.object({
   q: z.string().default("*"),
   family: z.enum(packageFamilies).optional(),
+  owner: z.string().trim().min(1).optional(),
+  tag: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
 });
 
 const packageParamsSchema = z.object({ name: z.string().min(1) });
 const packageVersionParamsSchema = packageParamsSchema.extend({ version: z.string().min(1) });
+const packageNameLike = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
 const skillParamsSchema = z.object({ slug: z.string().min(1) });
+const publisherParamsSchema = z.object({ handle: z.string().trim().min(1) });
+const organizationBodySchema = z.object({
+  handle: z.string().trim().min(1).max(80),
+  displayName: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+});
+const organizationMemberBodySchema = z.object({
+  handle: z.string().trim().min(1).max(80),
+  role: z.enum(["owner", "maintainer", "member"]).default("member"),
+});
+const tagParamsSchema = z.object({ tag: z.string().trim().min(1) });
+const versionListQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).optional(),
+  cursor: z.string().optional(),
+});
+const commentListQuerySchema = versionListQuerySchema;
+const commentBodySchema = z.object({
+  body: z.string().trim().min(1).max(2000),
+});
+const packageReportSchema = z.object({
+  reason: z.string().trim().min(3).max(1000),
+});
+const reportListQuerySchema = versionListQuerySchema.extend({
+  status: z.enum(["open", "reviewed", "dismissed"]).optional(),
+});
+const reportParamsSchema = z.object({
+  id: z.string().min(1),
+});
+const notificationParamsSchema = z.object({
+  id: z.string().min(1),
+});
+const notificationListQuerySchema = versionListQuerySchema.extend({
+  unreadOnly: z.coerce.boolean().optional(),
+});
+const userHandleParamsSchema = z.object({
+  handle: z.string().trim().min(1).max(80),
+});
+const userBanSchema = z.object({
+  reason: z.string().trim().max(500).nullable().optional(),
+});
+const reportUpdateSchema = z.object({
+  status: z.enum(["open", "reviewed", "dismissed"]),
+  resolution: z.string().trim().max(1000).nullable().optional(),
+  moderationStatus: z.enum(["pending", "approved", "rejected"]).optional(),
+});
+const reportAssignSchema = z.object({
+  assigneeHandle: z.string().trim().min(1).max(80),
+});
+const packageModerationSchema = z.object({
+  moderationStatus: z.enum(["pending", "approved", "rejected"]).optional(),
+  scanStatus: z.enum(["clean", "suspicious", "malicious", "pending", "not-run"]).optional(),
+  riskLevel: z.enum(["unknown", "low", "medium", "high"]).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
+});
+const packageScanSchema = z.object({
+  status: z.enum(["clean", "suspicious", "malicious", "queued", "failed", "not-run"]),
+  provider: z.enum(["structural", "webhook", "manual"]).default("manual"),
+  url: z.string().url().max(500).optional(),
+  riskLevel: z.enum(["unknown", "low", "medium", "high"]).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
+});
+const packageRebuildSchema = z.object({
+  status: z.enum(["not-run", "queued", "passed", "failed"]),
+  command: z.string().trim().max(240).optional(),
+  logUrl: z.string().url().max(500).optional(),
+  sourceRepo: z.string().trim().max(500).optional(),
+  sourceCommit: z.string().trim().max(120).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
+});
+const packageSettingsSchema = z.object({
+  displayName: z.string().trim().min(1).max(120).optional(),
+  summary: z.string().trim().max(500).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(48)).optional(),
+  channel: z.enum(["community", "private", "official"]).optional(),
+});
+const packageRenameSchema = z.object({
+  name: z.string().trim().min(1).max(214).regex(packageNameLike),
+});
+const packageTransferSchema = z.object({
+  targetHandle: z.string().trim().min(1).max(80),
+});
+const packageMergeSchema = z.object({
+  targetName: z.string().trim().min(1).max(214),
+});
+const packageVersionYankSchema = z.object({
+  message: z.string().trim().max(500).nullable().optional(),
+});
+const githubImportSchema = z.object({
+  repoUrl: z.string().trim().min(1),
+  ref: z.string().trim().min(1).max(120).default("main"),
+  path: z.string().trim().max(240).default(""),
+  name: z.string().trim().min(1).max(214).optional(),
+  displayName: z.string().trim().min(1).max(120).optional(),
+  family: z.enum(packageFamilies).optional(),
+  version: z.string().trim().optional(),
+  summary: z.string().trim().max(500).optional(),
+  tags: z.array(z.string().trim().min(1).max(48)).optional(),
+  compatibility: z
+    .object({
+      pluginApi: z.string().trim().min(1).optional(),
+      minGatewayVersion: z.string().trim().min(1).optional(),
+    })
+    .optional(),
+});
+const restoreSnapshotSchema = z.object({
+  packages: z.array(publishPackageSchema).max(100),
+});
 const downloadQuerySchema = z.object({
   version: z.string().optional(),
   tag: z.string().optional(),
@@ -35,6 +159,28 @@ const downloadQuerySchema = z.object({
 const skillDownloadQuerySchema = downloadQuerySchema.extend({
   slug: z.string().min(1),
 });
+const pluginFamilies: PackageFamily[] = ["code-plugin", "bundle-plugin"];
+
+function intEnv(name: string, fallback: number) {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function boolEnv(name: string, fallback: boolean) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function backupPolicy() {
+  const retentionDays = intEnv("KOVAHUB_BACKUP_RETENTION_DAYS", 0);
+  return {
+    retentionDays,
+    cutoffMs: retentionDays > 0 ? Date.now() - retentionDays * 24 * 60 * 60 * 1000 : 0,
+    maxVersions: intEnv("KOVAHUB_BACKUP_MAX_VERSIONS", 0),
+    includeArchives: boolEnv("KOVAHUB_BACKUP_INCLUDE_ARCHIVES", true),
+  };
+}
 
 function publicPackageDetail(pkg: PackageRecord) {
   return {
@@ -44,6 +190,7 @@ function publicPackageDetail(pkg: PackageRecord) {
       compatibility: pkg.compatibility ?? null,
       capabilities: pkg.capabilities ?? null,
       verification: pkg.verification ?? null,
+      versions: pkg.versions.map(publicVersionSummary),
       stats: pkg.stats,
     },
     owner: {
@@ -54,6 +201,38 @@ function publicPackageDetail(pkg: PackageRecord) {
   };
 }
 
+function publicVersionSummary(version: PackageVersionRecord) {
+  return {
+    version: version.version,
+    createdAt: version.createdAt,
+    yankedAt: version.yankedAt ?? null,
+    yankMessage: version.yankMessage ?? null,
+    changelog: version.changelog,
+    distTags: version.distTags,
+    files: version.files,
+    compatibility: version.compatibility ?? null,
+    capabilities: version.capabilities ?? null,
+    verification: version.verification ?? null,
+    documentation: version.documentation ?? null,
+    sha256hash: version.sha256hash,
+  };
+}
+
+function publicVersionListItem(version: PackageVersionRecord) {
+  return {
+    version: version.version,
+    createdAt: version.createdAt,
+    yankedAt: version.yankedAt ?? null,
+    yankMessage: version.yankMessage ?? null,
+    changelog: version.changelog,
+    distTags: version.distTags,
+  };
+}
+
+function isDeletedPackage(pkg: PackageRecord | null | undefined) {
+  return Boolean(pkg?.deletedAt);
+}
+
 function publicVersionDetail(pkg: PackageRecord, version: PackageVersionRecord) {
   return {
     package: {
@@ -62,17 +241,215 @@ function publicVersionDetail(pkg: PackageRecord, version: PackageVersionRecord) 
       family: pkg.family,
     },
     version: {
-      version: version.version,
-      createdAt: version.createdAt,
-      changelog: version.changelog,
-      distTags: version.distTags,
-      files: version.files,
-      compatibility: version.compatibility ?? null,
-      capabilities: version.capabilities ?? null,
-      verification: version.verification ?? null,
-      sha256hash: version.sha256hash,
+      ...publicVersionSummary(version),
     },
   };
+}
+
+function publicPackageComment(comment: PackageCommentRecord) {
+  return {
+    id: comment.id,
+    packageName: comment.packageName,
+    user: {
+      id: comment.userId,
+      handle: comment.userHandle,
+    },
+    body: comment.body,
+    reportCount: comment.reportCount,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+  };
+}
+
+function publicPackageReport(report: PackageReportRecord) {
+  return {
+    id: report.id,
+    packageName: report.packageName,
+    user: {
+      id: report.userId,
+      handle: report.userHandle,
+    },
+    reason: report.reason,
+    status: report.status,
+    resolution: report.resolution ?? null,
+    resolvedBy: report.resolvedById
+      ? {
+          id: report.resolvedById,
+          handle: report.resolvedByHandle ?? null,
+        }
+      : null,
+    resolvedAt: report.resolvedAt ?? null,
+    assignedTo: report.assignedToId
+      ? {
+          id: report.assignedToId,
+          handle: report.assignedToHandle ?? null,
+        }
+      : null,
+    assignedAt: report.assignedAt ?? null,
+    createdAt: report.createdAt,
+  };
+}
+
+function publicNotification(notification: NotificationRecord) {
+  return {
+    id: notification.id,
+    type: notification.type,
+    title: notification.title,
+    body: notification.body ?? null,
+    packageName: notification.packageName ?? null,
+    reportId: notification.reportId ?? null,
+    readAt: notification.readAt ?? null,
+    createdAt: notification.createdAt,
+  };
+}
+
+function publicOrganization(organization: OrganizationRecord) {
+  return {
+    id: organization.id,
+    handle: organization.handle,
+    displayName: organization.displayName,
+    description: organization.description ?? null,
+    createdAt: organization.createdAt,
+  };
+}
+
+function publicOrganizationMember(member: OrganizationMemberRecord) {
+  return {
+    organizationHandle: member.organizationHandle,
+    user: {
+      id: member.userId,
+      handle: member.userHandle,
+    },
+    role: member.role,
+    createdAt: member.createdAt,
+  };
+}
+
+function publicProfile(user: UserAccount, packages: PackageListItem[]) {
+  const stats = packages.reduce(
+    (accumulator, item) => {
+      accumulator.packages += 1;
+      if (item.family === "skill") accumulator.skills += 1;
+      else accumulator.plugins += 1;
+      accumulator.downloads += item.stats?.downloads ?? 0;
+      accumulator.installs += item.stats?.installs ?? 0;
+      accumulator.stars += item.stats?.stars ?? 0;
+      return accumulator;
+    },
+    { packages: 0, plugins: 0, skills: 0, downloads: 0, installs: 0, stars: 0 },
+  );
+
+  return {
+    handle: user.handle,
+    displayName: user.displayName ?? user.handle,
+    imageUrl: user.imageUrl ?? null,
+    bio: user.bio ?? null,
+    websiteUrl: user.websiteUrl ?? null,
+    company: user.company ?? null,
+    location: user.location ?? null,
+    createdAt: user.createdAt,
+    stats,
+  };
+}
+
+function publicModerationUser(user: UserAccount) {
+  return {
+    id: user.id,
+    handle: user.handle,
+    displayName: user.displayName ?? user.handle,
+    bannedAt: user.bannedAt ?? null,
+    banReason: user.banReason ?? null,
+  };
+}
+
+async function listAllPublisherPackages(repo: RegistryRepository, handle: string) {
+  const items: PackageListItem[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await repo.listPackages({ owner: handle, limit: 100, cursor: cursor ?? undefined });
+    items.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return items;
+}
+
+async function recordPackageSignal(
+  reply: FastifyReply,
+  repo: RegistryRepository,
+  name: string,
+  signal: "install" | "star",
+) {
+  const pkg = await repo.getPackage(name);
+  if (!pkg || isDeletedPackage(pkg)) {
+    reply.code(404);
+    return { package: null, stats: null };
+  }
+  if (signal === "install") await repo.recordInstall(pkg.name);
+  else await repo.recordStar(pkg.name);
+  const updated = (await repo.getPackage(pkg.name)) ?? pkg;
+  return {
+    package: toPackageListItem(updated),
+    stats: updated.stats,
+  };
+}
+
+function configuredReviewerHandles() {
+  return [
+    process.env.KOVAHUB_REVIEWER_HANDLES,
+    process.env.KOVAHUB_ADMIN_HANDLES,
+    process.env.KOVAHUB_REVIEWERS,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => value?.split(",") ?? [])
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isReviewer(user: AuthPrincipal) {
+  const handles = configuredReviewerHandles();
+  return handles.includes(user.handle.toLowerCase()) || handles.includes(`@${user.handle.toLowerCase()}`);
+}
+
+async function notifyUsers(
+  repo: RegistryRepository,
+  users: AuthPrincipal[],
+  input: Omit<NotificationRecord, "id" | "userId" | "createdAt" | "readAt">,
+) {
+  const seen = new Set<string>();
+  for (const user of users) {
+    if (seen.has(user.id)) continue;
+    seen.add(user.id);
+    await repo.createNotification({ ...input, userId: user.id });
+  }
+}
+
+async function notifyReportCreated(repo: RegistryRepository, pkg: PackageRecord, report: PackageReportRecord) {
+  const recipients: AuthPrincipal[] = [];
+  for (const handle of configuredReviewerHandles()) {
+    const reviewer = await repo.findUserByHandle(handle.replace(/^@/, ""));
+    if (reviewer) recipients.push({ id: reviewer.id, handle: reviewer.handle, email: reviewer.email });
+  }
+  if (pkg.ownerHandle) {
+    const owner = await repo.findUserByHandle(pkg.ownerHandle);
+    if (owner) recipients.push({ id: owner.id, handle: owner.handle, email: owner.email });
+  }
+  await notifyUsers(repo, recipients, {
+    type: "package_reported",
+    title: `New report for ${pkg.name}`,
+    body: report.reason,
+    packageName: pkg.name,
+    reportId: report.id,
+  });
+}
+
+async function requireReviewer(request: FastifyRequest, reply: FastifyReply, repo: RegistryRepository) {
+  const user = await requireAuth(request, reply, repo);
+  if (!user) return null;
+  if (!isReviewer(user)) {
+    reply.code(403).send({ error: "Reviewer access is required." });
+    return null;
+  }
+  return user;
 }
 
 function publicSkillDetail(pkg: PackageRecord) {
@@ -83,6 +460,7 @@ function publicSkillDetail(pkg: PackageRecord) {
       displayName: pkg.displayName,
       summary: pkg.summary ?? undefined,
       tags: pkg.tags,
+      topics: pkg.topics ?? [],
       createdAt: pkg.createdAt,
       updatedAt: pkg.updatedAt,
     },
@@ -105,6 +483,17 @@ function publicSkillDetail(pkg: PackageRecord) {
   };
 }
 
+function publicSkillListItem(pkg: PackageRecord) {
+  const detail = publicSkillDetail(pkg);
+  return detail.skill
+    ? {
+        ...detail.skill,
+        latestVersion: detail.latestVersion,
+        metadata: detail.metadata,
+      }
+    : null;
+}
+
 function sendArchive(reply: FastifyReply, params: { name: string; version: PackageVersionRecord }) {
   reply
     .header("content-type", "application/zip")
@@ -115,6 +504,31 @@ function sendArchive(reply: FastifyReply, params: { name: string; version: Packa
 
 function parseFamily(value: unknown): PackageFamily | undefined {
   return packageFamilies.find((family) => family === value);
+}
+
+function registryUrl() {
+  return (
+    process.env.KOVA_KOVAHUB_URL ??
+    process.env.KOVAHUB_URL ??
+    process.env.KOVAHUB_REGISTRY ??
+    process.env.KOVAHUB_REGISTRY_URL ??
+    "http://localhost:8787"
+  ).replace(/\/+$/, "");
+}
+
+function siteUrl() {
+  return (process.env.KOVAHUB_SITE ?? process.env.KOVAHUB_SITE_URL ?? "http://localhost:5173").replace(/\/+$/, "");
+}
+
+function paginatedVersionList(versions: PackageVersionRecord[], query: z.infer<typeof versionListQuerySchema>) {
+  const limit = Math.min(Math.max(query.limit ?? 50, 1), 100);
+  const offset = query.cursor ? Number.parseInt(query.cursor, 10) || 0 : 0;
+  const page = versions.slice(offset, offset + limit);
+  const nextOffset = offset + page.length;
+  return {
+    items: page.map(publicVersionListItem),
+    nextCursor: nextOffset < versions.length ? String(nextOffset) : null,
+  };
 }
 
 function parseJsonField(value: string, fieldName: string) {
@@ -181,38 +595,533 @@ async function parseMultipartPublishInput(request: FastifyRequest) {
   return preparePublishInputFromArchive({ archive, metadata });
 }
 
-export async function registerRegistryRoutes(app: FastifyInstance, repo: RegistryRepository) {
-  app.get("/healthz", async () => ({
-    ok: true,
-    service: "kovahub",
-  }));
+function parseGitHubRepo(value: string) {
+  const trimmed = value.trim();
+  const shorthand = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(trimmed);
+  if (shorthand) return { owner: shorthand[1] as string, repo: shorthand[2] as string };
+  const url = new URL(trimmed);
+  if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
+    throw new Error("Only github.com repositories are supported.");
+  }
+  const [owner, repo] = url.pathname.replace(/^\/+/, "").split("/");
+  if (!owner || !repo) throw new Error("GitHub repository URL must include owner and repo.");
+  return { owner, repo: repo.replace(/\.git$/, "") };
+}
 
+function cleanGitHubPath(value: string | undefined) {
+  const trimmed = value?.trim().replace(/^\/+|\/+$/g, "") ?? "";
+  if (trimmed.includes("..")) throw new Error("GitHub import path cannot contain '..'.");
+  return trimmed;
+}
+
+function rawGitHubUrl(params: { owner: string; repo: string; ref: string; path: string }) {
+  const filePath = cleanGitHubPath(params.path);
+  const encodedPath = filePath
+    ? filePath
+        .split("/")
+        .map((part) => encodeURIComponent(part))
+        .join("/")
+    : "";
+  return `https://raw.githubusercontent.com/${encodeURIComponent(params.owner)}/${encodeURIComponent(params.repo)}/${encodeURIComponent(params.ref)}/${encodedPath}`;
+}
+
+async function fetchGitHubText(params: { owner: string; repo: string; ref: string; basePath: string; file: string }) {
+  const pathPrefix = cleanGitHubPath(params.basePath);
+  const filePath = pathPrefix ? `${pathPrefix}/${params.file}` : params.file;
+  const response = await fetch(rawGitHubUrl({ owner: params.owner, repo: params.repo, ref: params.ref, path: filePath }), {
+    headers: { "user-agent": "KovaHub" },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`GitHub fetch failed for ${params.file}: HTTP ${response.status}.`);
+  return response.text();
+}
+
+async function buildGitHubImportPayload(input: z.infer<typeof githubImportSchema>) {
+  const repo = parseGitHubRepo(input.repoUrl);
+  const [packageJsonText, readmeText, skillText] = await Promise.all([
+    fetchGitHubText({ ...repo, ref: input.ref, basePath: input.path, file: "package.json" }),
+    fetchGitHubText({ ...repo, ref: input.ref, basePath: input.path, file: "README.md" }),
+    fetchGitHubText({ ...repo, ref: input.ref, basePath: input.path, file: "SKILL.md" }),
+  ]);
+  const packageJson = packageJsonText ? (JSON.parse(packageJsonText) as Record<string, unknown>) : {};
+  const inferredFamily = skillText ? "skill" : "code-plugin";
+  const kova = packageJson.kova && typeof packageJson.kova === "object" ? (packageJson.kova as Record<string, unknown>) : null;
+  const kovaCompat = kova?.compat && typeof kova.compat === "object" ? (kova.compat as Record<string, string>) : null;
+  const family = input.family ?? inferredFamily;
+  const payload = {
+    name: input.name ?? (typeof packageJson.name === "string" ? packageJson.name : repo.repo),
+    displayName: input.displayName ?? (typeof packageJson.displayName === "string" ? packageJson.displayName : undefined),
+    family,
+    version: input.version ?? (typeof packageJson.version === "string" ? packageJson.version : "0.1.0"),
+    summary: input.summary ?? (typeof packageJson.description === "string" ? packageJson.description : undefined),
+    tags: input.tags ?? [],
+    compatibility:
+      family === "skill"
+        ? undefined
+        : {
+            pluginApi: input.compatibility?.pluginApi ?? kovaCompat?.pluginApi,
+            minGatewayVersion: input.compatibility?.minGatewayVersion ?? kovaCompat?.minGatewayVersion,
+          },
+    files: [
+      packageJsonText
+        ? { path: "package.json", content: packageJsonText, contentType: "application/json" }
+        : null,
+      skillText ? { path: "SKILL.md", content: skillText, contentType: "text/markdown" } : null,
+      readmeText ? { path: "README.md", content: readmeText, contentType: "text/markdown" } : null,
+    ].filter((file): file is { path: string; content: string; contentType: string } => Boolean(file)),
+  };
+  const parsed = publishPackageSchema.safeParse(payload);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Imported package metadata is invalid.");
+  return parsed.data;
+}
+
+async function listPackageCatalog(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  repo: RegistryRepository,
+  filter: { family?: PackageFamily; families?: PackageFamily[]; owner?: string; tag?: string; sort?: "recent" | "popular" | "trending" } = {},
+) {
+  const parsed = listQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    reply.code(400);
+    return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
+  }
+  const options = { ...parsed.data, ...filter };
+  if (filter.families) delete options.family;
+  return repo.listPackages(options);
+}
+
+async function searchPackageCatalog(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  repo: RegistryRepository,
+  filter: { family?: PackageFamily; families?: PackageFamily[]; owner?: string; tag?: string } = {},
+) {
+  const parsed = searchQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    reply.code(400);
+    return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
+  }
+  const options = { ...parsed.data, ...filter };
+  if (filter.families) delete options.family;
+  return { results: await repo.searchPackages(options) };
+}
+
+export async function registerRegistryRoutes(app: FastifyInstance, repo: RegistryRepository) {
   app.get("/api/v1/meta", async () => ({
     name: "KovaHub",
-    registry: process.env.KOVAHUB_REGISTRY_URL ?? "http://localhost:8787",
-    site: process.env.KOVAHUB_SITE_URL ?? "http://localhost:5173",
+    registry: registryUrl(),
+    site: siteUrl(),
     compatibility: {
-      env: ["KOVAHUB_REGISTRY", "KOVAHUB_SITE"],
+      env: ["KOVA_KOVAHUB_URL", "KOVAHUB_URL", "KOVAHUB_REGISTRY", "KOVAHUB_SITE"],
       packageCompatibilityFields: ["pluginApiRange", "minGatewayVersion"],
     },
   }));
 
+  app.get("/openapi.json", async () => openApiDocument);
+
+  app.get("/.well-known/kovahub.json", async () => ({
+    name: "KovaHub",
+    apiBase: registryUrl(),
+    authBase: registryUrl(),
+    siteBase: siteUrl(),
+    registry: registryUrl(),
+    site: siteUrl(),
+    minCliVersion: "0.0.1",
+    env: {
+      url: "KOVAHUB_URL",
+      kovaUrl: "KOVA_KOVAHUB_URL",
+      registry: "KOVAHUB_REGISTRY",
+      site: "KOVAHUB_SITE",
+    },
+    routes: {
+      packages: "/api/v1/packages",
+      plugins: "/api/v1/plugins",
+      skills: "/api/v1/skills",
+      search: "/api/v1/search",
+      whoami: "/api/v1/whoami",
+    },
+  }));
+
   app.get("/api/v1/packages", async (request, reply) => {
-    const parsed = listQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      reply.code(400);
-      return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
-    }
-    return repo.listPackages(parsed.data);
+    return listPackageCatalog(request, reply, repo);
   });
 
   app.get("/api/v1/packages/search", async (request, reply) => {
+    return searchPackageCatalog(request, reply, repo);
+  });
+
+  app.get("/api/v1/search/suggestions", async (request, reply) => {
     const parsed = searchQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       reply.code(400);
-      return { error: parsed.error.issues[0]?.message ?? "Invalid query." };
+      return { error: parsed.error.issues[0]?.message ?? "Invalid search suggestion request." };
     }
-    return { results: await repo.searchPackages(parsed.data) };
+    const query = parsed.data.q.trim();
+    const packageResults = await repo.searchPackages({ q: query || "*", limit: parsed.data.limit ?? 8 });
+    const catalog = await repo.listPackages({ q: query || undefined, limit: 100 });
+    const tagCounts = new Map<string, number>();
+    const publishers = new Map<string, number>();
+    for (const item of catalog.items) {
+      for (const topic of item.topics ?? []) tagCounts.set(topic, (tagCounts.get(topic) ?? 0) + 1);
+      if (item.ownerHandle) publishers.set(item.ownerHandle, (publishers.get(item.ownerHandle) ?? 0) + 1);
+    }
+    return {
+      packages: packageResults.slice(0, 8).map((result) => result.package),
+      tags: [...tagCounts.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, 8)
+        .map(([tag, count]) => ({ tag, count })),
+      publishers: [...publishers.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, 8)
+        .map(([handle, count]) => ({ handle, count })),
+    };
+  });
+
+  app.get("/api/v1/packages/trending", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { sort: "trending" });
+  });
+
+  app.get("/api/v1/stars", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid stars list request." };
+    }
+    return repo.listStarredPackages(user.id, query.data);
+  });
+
+  app.get("/api/v1/notifications", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const query = notificationListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid notification list request." };
+    }
+    const page = await repo.listNotifications(user.id, query.data);
+    return {
+      items: page.items.map(publicNotification),
+      nextCursor: page.nextCursor,
+    };
+  });
+
+  app.patch("/api/v1/notifications/:id/read", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = notificationParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid notification id." };
+    }
+    const notification = await repo.markNotificationRead(user.id, params.data.id);
+    if (!notification) {
+      reply.code(404);
+      return { notification: null };
+    }
+    return { notification: publicNotification(notification) };
+  });
+
+  app.get("/api/v1/reviewer/reports", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const query = reportListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid moderation report list request." };
+    }
+    const reports = await repo.listPackageReports(query.data);
+    return {
+      items: reports.items.map(publicPackageReport),
+      nextCursor: reports.nextCursor,
+    };
+  });
+
+  app.patch("/api/v1/reviewer/reports/:id", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = reportParamsSchema.safeParse(request.params);
+    const body = reportUpdateSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid moderation report request."
+          : body.error.issues[0]?.message ?? "Invalid moderation report payload.",
+      };
+    }
+    const report = await repo.updatePackageReport(params.data.id, reviewer, body.data);
+    if (!report) {
+      reply.code(404);
+      return { report: null };
+    }
+    await repo.createNotification({
+      userId: report.userId,
+      type: "report_resolved",
+      title: `Report ${report.status}`,
+      body: report.resolution ?? "A reviewer updated your package report.",
+      packageName: report.packageName,
+      reportId: report.id,
+    });
+    return { report: publicPackageReport(report) };
+  });
+
+  app.post("/api/v1/reviewer/reports/:id/assign", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = reportParamsSchema.safeParse(request.params);
+    const body = reportAssignSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid report assignment request."
+          : body.error.issues[0]?.message ?? "Invalid report assignment payload.",
+      };
+    }
+    const report = await repo.assignPackageReport(params.data.id, reviewer, body.data.assigneeHandle);
+    if (!report) {
+      reply.code(404);
+      return { report: null };
+    }
+    if (report.assignedToId) {
+      await repo.createNotification({
+        userId: report.assignedToId,
+        type: "report_assigned",
+        title: `Assigned report for ${report.packageName}`,
+        body: `Assigned by ${reviewer.handle}.`,
+        packageName: report.packageName,
+        reportId: report.id,
+      });
+    }
+    return { report: publicPackageReport(report) };
+  });
+
+  app.post("/api/v1/reviewer/users/:handle/ban", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = userHandleParamsSchema.safeParse(request.params);
+    const body = userBanSchema.safeParse(request.body ?? {});
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid user ban request."
+          : body.error.issues[0]?.message ?? "Invalid user ban payload.",
+      };
+    }
+    try {
+      const user = await repo.setUserBan(params.data.handle, reviewer, {
+        banned: true,
+        reason: body.data.reason ?? null,
+      });
+      if (!user) {
+        reply.code(404);
+        return { user: null };
+      }
+      return { user: publicModerationUser(user) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "User ban failed." };
+    }
+  });
+
+  app.delete("/api/v1/reviewer/users/:handle/ban", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = userHandleParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid user ban request." };
+    }
+    const user = await repo.setUserBan(params.data.handle, reviewer, { banned: false });
+    if (!user) {
+      reply.code(404);
+      return { user: null };
+    }
+    return { user: publicModerationUser(user) };
+  });
+
+  app.delete("/api/v1/reviewer/packages/:name", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package hard-delete request." };
+    }
+    const deleted = await repo.hardDeletePackage(params.data.name, reviewer);
+    if (!deleted) {
+      reply.code(404);
+      return { deleted: false };
+    }
+    return { deleted: true };
+  });
+
+  app.post("/api/v1/reviewer/packages/:name/merge", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageMergeSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package merge request."
+          : body.error.issues[0]?.message ?? "Invalid package merge payload.",
+      };
+    }
+    try {
+      const pkg = await repo.mergePackage(params.data.name, body.data.targetName, reviewer);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package merge failed." };
+    }
+  });
+
+  app.get("/api/v1/me/organizations", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const organizations = await repo.listUserOrganizations(user.id);
+    return { organizations: organizations.map(publicOrganization) };
+  });
+
+  app.post("/api/v1/organizations", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const body = organizationBodySchema.safeParse(request.body);
+    if (!body.success) {
+      reply.code(400);
+      return { error: body.error.issues[0]?.message ?? "Invalid organization payload." };
+    }
+    try {
+      const organization = await repo.createOrganization(user, body.data);
+      reply.code(201);
+      return { organization: publicOrganization(organization) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Organization creation failed." };
+    }
+  });
+
+  app.get("/api/v1/organizations/:handle", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid organization handle." };
+    }
+    const organization = await repo.getOrganizationByHandle(params.data.handle);
+    if (!organization) {
+      reply.code(404);
+      return { organization: null };
+    }
+    return { organization: publicOrganization(organization) };
+  });
+
+  app.get("/api/v1/organizations/:handle/members", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid organization handle." };
+    }
+    const organization = await repo.getOrganizationByHandle(params.data.handle);
+    if (!organization) {
+      reply.code(404);
+      return { items: [] };
+    }
+    const members = await repo.listOrganizationMembers(organization.handle);
+    return { items: members.map(publicOrganizationMember) };
+  });
+
+  app.post("/api/v1/organizations/:handle/members", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = publisherParamsSchema.safeParse(request.params);
+    const body = organizationMemberBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid organization member request."
+          : body.error.issues[0]?.message ?? "Invalid organization member payload.",
+      };
+    }
+    try {
+      const member = await repo.addOrganizationMember(params.data.handle, user, body.data.handle, body.data.role);
+      if (!member) {
+        reply.code(404);
+        return { member: null };
+      }
+      return { member: publicOrganizationMember(member) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Organization member update failed." };
+    }
+  });
+
+  app.get("/api/v1/profiles/:handle", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid profile handle." };
+    }
+    const user = await repo.findUserByHandle(params.data.handle);
+    if (!user) {
+      reply.code(404);
+      return { profile: null };
+    }
+    const packages = await listAllPublisherPackages(repo, user.handle);
+    return { profile: publicProfile(user, packages) };
+  });
+
+  app.get("/api/v1/publishers/:handle/packages", async (request, reply) => {
+    const params = publisherParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid publisher handle." };
+    }
+    return listPackageCatalog(request, reply, repo, { owner: params.data.handle });
+  });
+
+  app.get("/api/v1/tags/:tag/packages", async (request, reply) => {
+    const params = tagParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package tag." };
+    }
+    return listPackageCatalog(request, reply, repo, { tag: params.data.tag });
+  });
+
+  app.get("/api/v1/plugins", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { families: pluginFamilies });
+  });
+
+  app.get("/api/v1/plugins/search", async (request, reply) => {
+    return searchPackageCatalog(request, reply, repo, { families: pluginFamilies });
+  });
+
+  app.get("/api/v1/code-plugins", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { family: "code-plugin" });
+  });
+
+  app.get("/api/v1/code-plugins/search", async (request, reply) => {
+    return searchPackageCatalog(request, reply, repo, { family: "code-plugin" });
+  });
+
+  app.get("/api/v1/bundle-plugins", async (request, reply) => {
+    return listPackageCatalog(request, reply, repo, { family: "bundle-plugin" });
+  });
+
+  app.get("/api/v1/bundle-plugins/search", async (request, reply) => {
+    return searchPackageCatalog(request, reply, repo, { family: "bundle-plugin" });
   });
 
   app.post("/api/v1/packages", async (request, reply) => {
@@ -244,6 +1153,373 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
     }
   });
 
+  app.post("/api/v1/import/github/preview", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = githubImportSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid GitHub import payload." };
+    }
+    try {
+      return { package: await buildGitHubImportPayload(parsed.data) };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "GitHub import preview failed." };
+    }
+  });
+
+  app.post("/api/v1/import/github", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = githubImportSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid GitHub import payload." };
+    }
+    try {
+      const payload = await buildGitHubImportPayload(parsed.data);
+      const pkg = await repo.publishPackage(payload, user);
+      reply.code(201);
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "GitHub import failed." };
+    }
+  });
+
+  app.get("/api/v1/me/packages", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Invalid owner package list request." };
+    }
+    return repo.listPackages({
+      owner: user.handle,
+      includeDeleted: true,
+      limit: query.data.limit,
+      cursor: query.data.cursor,
+    });
+  });
+
+  app.get("/api/v1/me/backup", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const policy = backupPolicy();
+    const ownerHandles = new Set([user.handle]);
+    for (const organization of await repo.listUserOrganizations(user.id)) ownerHandles.add(organization.handle);
+    const packages: Array<z.infer<typeof publishPackageSchema>> = [];
+    let skippedByRetention = 0;
+    let skippedByLimit = 0;
+    for (const ownerHandle of ownerHandles) {
+      let cursor: string | null = null;
+      do {
+        const page = await repo.listPackages({ owner: ownerHandle, includeDeleted: true, limit: 100, cursor: cursor ?? undefined });
+        for (const item of page.items) {
+          const pkg = await repo.getPackage(item.name);
+          if (!pkg) continue;
+          for (const version of [...pkg.versions].reverse()) {
+            if (policy.cutoffMs > 0 && version.createdAt < policy.cutoffMs) {
+              skippedByRetention += 1;
+              continue;
+            }
+            if (policy.maxVersions > 0 && packages.length >= policy.maxVersions) {
+              skippedByLimit += 1;
+              continue;
+            }
+            const archive = policy.includeArchives ? await repo.getArchive(pkg.name, { version: version.version }) : null;
+            if (policy.includeArchives && !archive) continue;
+            const entry: z.infer<typeof publishPackageSchema> = {
+              name: pkg.name,
+              ownerHandle: pkg.ownerHandle ?? undefined,
+              displayName: pkg.displayName,
+              family: pkg.family,
+              version: version.version,
+              summary: pkg.summary ?? undefined,
+              channel: pkg.channel,
+              tags: pkg.topics ?? [],
+              compatibility: version.compatibility
+                ? {
+                    pluginApi: version.compatibility.pluginApiRange,
+                    minGatewayVersion: version.compatibility.minGatewayVersion,
+                  }
+                : undefined,
+              files: [],
+              changelog: version.changelog,
+            };
+            if (archive) entry.archiveBase64 = archive.version.archive.toString("base64");
+            packages.push(entry);
+          }
+        }
+        cursor = page.nextCursor;
+      } while (cursor);
+    }
+    return {
+      snapshot: {
+        version: 1,
+        generatedAt: Date.now(),
+        policy: {
+          retentionDays: policy.retentionDays,
+          maxVersions: policy.maxVersions,
+          includeArchives: policy.includeArchives,
+          skippedByRetention,
+          skippedByLimit,
+        },
+        packages,
+      },
+    };
+  });
+
+  app.post("/api/v1/me/restore", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = restoreSnapshotSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.issues[0]?.message ?? "Invalid restore snapshot." };
+    }
+    const restored = [];
+    try {
+      for (const entry of parsed.data.packages) {
+        restored.push(toPackageListItem(await repo.publishPackage(entry, user)));
+      }
+      return { restored };
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Restore failed.", restored };
+    }
+  });
+
+  app.patch("/api/v1/packages/:name/settings", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageSettingsSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package settings request." : body.error.issues[0]?.message ?? "Invalid package settings payload." };
+    }
+    try {
+      const pkg = await repo.updatePackageSettings(params.data.name, user, body.data);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package settings update failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/rename", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageRenameSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package rename request." : body.error.issues[0]?.message ?? "Invalid package rename payload." };
+    }
+    try {
+      const pkg = await repo.renamePackage(params.data.name, user, body.data.name);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package rename failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/transfer", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageTransferSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package transfer request." : body.error.issues[0]?.message ?? "Invalid package transfer payload." };
+    }
+    try {
+      const pkg = await repo.transferPackage(params.data.name, user, body.data.targetHandle);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package transfer failed." };
+    }
+  });
+
+  app.delete("/api/v1/packages/:name", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package delete request." };
+    }
+    try {
+      const pkg = await repo.setPackageDeleted(params.data.name, user, true);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package delete failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/restore", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.code(400);
+      return { error: "Invalid package restore request." };
+    }
+    try {
+      const pkg = await repo.setPackageDeleted(params.data.name, user, false);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package restore failed." };
+    }
+  });
+
+  app.post("/api/v1/packages/:name/versions/:version/yank", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageVersionParamsSchema.safeParse(request.params);
+    const body = packageVersionYankSchema.safeParse(request.body ?? {});
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return { error: body.success ? "Invalid package version yank request." : body.error.issues[0]?.message ?? "Invalid package version yank payload." };
+    }
+    try {
+      const pkg = await repo.yankPackageVersion(params.data.name, params.data.version, user, body.data.message);
+      if (!pkg) {
+        reply.code(404);
+        return { package: null };
+      }
+      return publicPackageDetail(pkg);
+    } catch (error) {
+      reply.code(400);
+      return { error: error instanceof Error ? error.message : "Package version yank failed." };
+    }
+  });
+
+  app.patch("/api/v1/packages/:name/moderation", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageModerationSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package moderation request."
+          : body.error.issues[0]?.message ?? "Invalid package moderation payload.",
+      };
+    }
+    const pkg = await repo.updatePackageModeration(params.data.name, reviewer, body.data);
+    if (!pkg) {
+      reply.code(404);
+      return { package: null };
+    }
+    if (pkg.ownerHandle) {
+      const owner = await repo.findUserByHandle(pkg.ownerHandle);
+      if (owner) {
+        await repo.createNotification({
+          userId: owner.id,
+          type: "package_moderated",
+          title: `Moderation updated for ${pkg.name}`,
+          body: pkg.verification?.summary ?? "A reviewer updated this package's moderation status.",
+          packageName: pkg.name,
+        });
+      }
+    }
+    return publicPackageDetail(pkg);
+  });
+
+  app.post("/api/v1/reviewer/packages/:name/scan", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageScanSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid scanner result request."
+          : body.error.issues[0]?.message ?? "Invalid scanner result payload.",
+      };
+    }
+    const scanStatus = body.data.status === "queued" || body.data.status === "failed" ? "pending" : body.data.status;
+    const pkg = await repo.updatePackageModeration(params.data.name, reviewer, {
+      scanStatus,
+      riskLevel: body.data.riskLevel,
+      summary: body.data.summary ?? undefined,
+      scanner: {
+        provider: body.data.provider,
+        status: body.data.status,
+        checkedAt: Date.now(),
+        url: body.data.url,
+      },
+    });
+    if (!pkg) {
+      reply.code(404);
+      return { package: null };
+    }
+    return publicPackageDetail(pkg);
+  });
+
+  app.post("/api/v1/reviewer/packages/:name/rebuild", async (request, reply) => {
+    const reviewer = await requireReviewer(request, reply, repo);
+    if (!reviewer) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageRebuildSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid rebuild result request."
+          : body.error.issues[0]?.message ?? "Invalid rebuild result payload.",
+      };
+    }
+    const pkg = await repo.updatePackageModeration(params.data.name, reviewer, {
+      tier: body.data.status === "passed" ? "rebuild-verified" : undefined,
+      scope: body.data.status === "passed" ? "dependency-graph-aware" : undefined,
+      summary: body.data.summary ?? undefined,
+      rebuild: {
+        status: body.data.status,
+        checkedAt: Date.now(),
+        command: body.data.command,
+        logUrl: body.data.logUrl,
+        sourceRepo: body.data.sourceRepo,
+        sourceCommit: body.data.sourceCommit,
+      },
+    });
+    if (!pkg) {
+      reply.code(404);
+      return { package: null };
+    }
+    return publicPackageDetail(pkg);
+  });
+
   app.get("/api/v1/packages/:name", async (request, reply) => {
     const parsed = packageParamsSchema.safeParse(request.params);
     if (!parsed.success) {
@@ -251,11 +1527,26 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid package name." };
     }
     const pkg = await repo.getPackage(parsed.data.name);
-    if (!pkg) {
+    if (!pkg || isDeletedPackage(pkg)) {
       reply.code(404);
       return { package: null, owner: null };
     }
     return publicPackageDetail(pkg);
+  });
+
+  app.get("/api/v1/packages/:name/versions", async (request, reply) => {
+    const params = packageParamsSchema.safeParse(request.params);
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      reply.code(400);
+      return { error: "Invalid package version list request." };
+    }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { items: [], nextCursor: null };
+    }
+    return paginatedVersionList(pkg.versions, query.data);
   });
 
   app.get("/api/v1/packages/:name/versions/:version", async (request, reply) => {
@@ -265,11 +1556,146 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid package version request." };
     }
     const found = await repo.getPackageVersion(parsed.data.name, parsed.data.version);
-    if (!found) {
+    if (!found || isDeletedPackage(found.pkg)) {
       reply.code(404);
       return { package: null, version: null };
     }
     return publicVersionDetail(found.pkg, found.version);
+  });
+
+  app.post("/api/v1/packages/:name/install", async (request, reply) => {
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package install signal." };
+    }
+    return recordPackageSignal(reply, repo, parsed.data.name, "install");
+  });
+
+  app.post("/api/v1/packages/:name/star", async (request, reply) => {
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package star signal." };
+    }
+    return recordPackageSignal(reply, repo, parsed.data.name, "star");
+  });
+
+  app.get("/api/v1/packages/:name/star", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package star state request." };
+    }
+    const pkg = await repo.getPackage(parsed.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { starred: false };
+    }
+    return { starred: await repo.getPackageStar(parsed.data.name, user.id) };
+  });
+
+  app.post("/api/v1/packages/:name/star/toggle", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const parsed = packageParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "Invalid package star request." };
+    }
+    const pkg = await repo.getPackage(parsed.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { package: null, stats: null, starred: false };
+    }
+    const result = await repo.togglePackageStar(parsed.data.name, user);
+    if (!result) {
+      reply.code(404);
+      return { package: null, stats: null, starred: false };
+    }
+    return {
+      package: toPackageListItem(result.pkg),
+      stats: result.pkg.stats,
+      starred: result.starred,
+    };
+  });
+
+  app.get("/api/v1/packages/:name/comments", async (request, reply) => {
+    const params = packageParamsSchema.safeParse(request.params);
+    const query = commentListQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      reply.code(400);
+      return { error: "Invalid package comments request." };
+    }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { items: [], nextCursor: null };
+    }
+    const comments = await repo.listPackageComments(params.data.name, query.data);
+    return {
+      items: comments.items.map(publicPackageComment),
+      nextCursor: comments.nextCursor,
+    };
+  });
+
+  app.post("/api/v1/packages/:name/comments", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = commentBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package comments request."
+          : body.error.issues[0]?.message ?? "Invalid comment payload.",
+      };
+    }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { comment: null };
+    }
+    const comment = await repo.addPackageComment(params.data.name, user, body.data.body);
+    if (!comment) {
+      reply.code(404);
+      return { comment: null };
+    }
+    reply.code(201);
+    return { comment: publicPackageComment(comment) };
+  });
+
+  app.post("/api/v1/packages/:name/report", async (request, reply) => {
+    const user = await requireAuth(request, reply, repo);
+    if (!user) return reply;
+    const params = packageParamsSchema.safeParse(request.params);
+    const body = packageReportSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.code(400);
+      return {
+        error: body.success
+          ? "Invalid package report request."
+          : body.error.issues[0]?.message ?? "Invalid report payload.",
+      };
+    }
+    const pkg = await repo.getPackage(params.data.name);
+    if (!pkg || isDeletedPackage(pkg)) {
+      reply.code(404);
+      return { report: null };
+    }
+    const report = await repo.reportPackage(params.data.name, user, body.data.reason);
+    if (!report) {
+      reply.code(404);
+      return { report: null };
+    }
+    await notifyReportCreated(repo, pkg, report);
+    reply.code(201);
+    return {
+      report: publicPackageReport(report),
+    };
   });
 
   app.get("/api/v1/packages/:name/download", async (request, reply) => {
@@ -325,7 +1751,7 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       items: await Promise.all(
         page.items.map(async (item) => {
           const pkg = await repo.getPackage(item.name);
-          return pkg ? publicSkillDetail(pkg).skill : null;
+          return pkg ? publicSkillListItem(pkg) : null;
         }),
       ).then((items) => items.filter(Boolean)),
       nextCursor: page.nextCursor,
@@ -339,11 +1765,26 @@ export async function registerRegistryRoutes(app: FastifyInstance, repo: Registr
       return { error: "Invalid skill slug." };
     }
     const pkg = await repo.getPackage(parsed.data.slug);
-    if (!pkg || pkg.family !== "skill") {
+    if (!pkg || isDeletedPackage(pkg) || pkg.family !== "skill") {
       reply.code(404);
       return { skill: null, latestVersion: null, owner: null };
     }
     return publicSkillDetail(pkg);
+  });
+
+  app.get("/api/v1/skills/:slug/versions", async (request, reply) => {
+    const params = skillParamsSchema.safeParse(request.params);
+    const query = versionListQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      reply.code(400);
+      return { error: "Invalid skill version list request." };
+    }
+    const pkg = await repo.getPackage(params.data.slug);
+    if (!pkg || isDeletedPackage(pkg) || pkg.family !== "skill") {
+      reply.code(404);
+      return { items: [], nextCursor: null };
+    }
+    return paginatedVersionList(pkg.versions, query.data);
   });
 
   app.get("/api/v1/download", async (request, reply) => {

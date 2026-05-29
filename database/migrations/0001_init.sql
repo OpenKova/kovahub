@@ -93,6 +93,3 @@ create table if not exists api_tokens (
 create index if not exists packages_family_updated_idx on packages (family, updated_at desc);
 create index if not exists packages_owner_idx on packages (owner_id);
 create index if not exists package_versions_package_created_idx on package_versions (package_id, created_at desc);
-create index if not exists packages_search_idx on packages using gin (
-  to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(display_name, '') || ' ' || coalesce(summary, ''))
-);
